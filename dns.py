@@ -1,14 +1,18 @@
+# Very simple DNS stub resolver.
+# Doesn't do recursive queries. No error handling. Assumes server is not malicious.
+# This is a nice resource to understand the packets: http://www.zytrax.com/books/dns/ch15/
+#
 # RR = DNS Resource Record
-
-# Simple DNS stub resolver
-# (doesn't do recursive queries)
 
 import random
 import struct
 import pprint
+import socket
 
 # First 16 bits is an ID for the query, so that responses can be matched
-ID = random.randint(0, 65535) # 16
+#ID = random.randint(0, 65535) # 16
+ID = 2
+print "Picked ID", ID
 
 # Second 16 bits 
 second_fields = [
@@ -42,9 +46,22 @@ header = struct.pack('!HHHHHH', ID, pack_bits(second_fields), QDCOUNT, ANCOUNT, 
 # header = struct.pack('!H', 0) # shortcut since all were zeroes
 # print " ".join(hex(ord(c)) for c in header)
 
+QTYPES = {
+	0x0001: "A",
+	0x0002: "NS",
+	0x0005: "CNAME",
+	0x0006: "SOA",
+	0x000B: "WKS",
+	0x000C: "PTR",
+	0x000F: "MX",
+	0x0021: "SRV",
+	0x001C: "AAAA"
+}
+QTYPESi = dict((v, k) for k, v in QTYPES.items())
+
 query = "google.com."
 qname = "".join([struct.pack('!B', len(label)) + label for label in query.split('.')])
-QTYPE = 1 # 1 means querying for A record (CNAME is 5, MX is 15)
+QTYPE = QTYPESi['A'] # 1 means querying for A record (CNAME is 5, MX is 15)
 qtype = struct.pack('!H', QTYPE)
 QCLASS = 1 # the Internet
 qclass = struct.pack('!H', QCLASS)
@@ -63,7 +80,6 @@ message_id, a, b = struct.unpack('!HBB', data[0:4])
 # qname, qtype, qclass
 
 # Send the data
-import socket
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 DNS_PORT = 53
 dest = ('8.8.8.8', DNS_PORT)
@@ -113,8 +129,77 @@ def parse_header(header):
 	})
 	return out
 
+def parse_label(chunk):
+	# Length of string, followed by actual string bytes for each part of domain name ("label").
+	# Zero length label means end of domain name.
+	i = 0
+	parts = []
+	while True:
+		part_length = ord(chunk[i])
+		if part_length == 0:
+			break
+		parts.append(chunk[i+1:i+1+part_length])
+		i += part_length + 1
+	i += 1
+	return i, ".".join(parts)
+
+# https://tools.ietf.org/html/rfc1035
+# "4.1.2. Question section format"
 def parse_question_section(section):
-	pass
+	print "Parsing question section"
+
+	bytes_read, domain_name = parse_label(section)
+
+	# # Length of string, followed by actual string bytes for each part of domain name ("label").
+	# # Zero length label means end of domain name.
+	# i = 0
+	# parts = []
+	# while True:
+	# 	part_length = ord(section[i])
+	# 	if part_length == 0:
+	# 		break
+	# 	parts.append(section[i+1:i+1+part_length])
+	# 	i += part_length + 1
+
+	# domain_name = ".".join(parts)
+
+	# i += 1 # Skip the byte indicating zero length 
+	qtype, qclass = struct.unpack('!HH', section[bytes_read:bytes_read+4])
+
+	print "Received answer for", domain_name
+	print "QTYPE:", QTYPES[qtype]
+	print "QCLASS:", "Internet" if qclass == 1 else "Something strange!"
+
+	question_section_length = bytes_read + 4
+	return question_section_length
+
+def parse_answer_section(section, whole_response):
+
+	# NAME could either be a pointer to previously mentioned domain name, or an actual name.
+	# 
+
+	# print " ".join(hex(ord(c)) for c in section)
+
+	# Starts off with NAME like 0xc00c (two bytes)
+
+	first_16_bits = struct.unpack('!H', section[0:2])[0]
+	is_pointer = (first_16_bits & 0b1100000000000000) != 0
+	if is_pointer:
+		pointer = first_16_bits & 0b0011111111111111
+		pointed = whole_response[pointer:]
+		pointed_label_length, pointed_label = parse_label(pointed)
+		print 'Answer section contained pointer to label "' + pointed_label + '"'
+
+	else:
+		print "Not a pointer... not implemented"
+		exit()
+
+	print is_pointer
+
+	# Then comes the TYPE represented as two bytes which is the requested type (A, MX etc.)
+	# And again "Internet" as 0x00 0x01
+
+	# label_length, domain_name = parse_label(section)
 
 def parse_response(response):
 	id_bytes = 2
@@ -131,8 +216,14 @@ def parse_response(response):
 	# Question section is variable size, so can't actually cut out just that without looking at it,
 	# so pass the whole rest of the response to question section parser.
 	question_section = response[header_length:]
+	question_section_length = parse_question_section(question_section)
+	print "Question section was", question_section_length, "bytes"
 
-	return out
+	answer_section = response[header_length + question_section_length:]
+
+	# Answer section may contain pointers to earlier parts because of compression, 
+	# which is why entire response needs to be passed in.
+	parse_answer_section(answer_section, response)
 
 response_hexed = " ".join(hex(ord(c)) for c in response)
 # print "Received message len %s from %s: %s" % (len(response), addr, response_hexed)

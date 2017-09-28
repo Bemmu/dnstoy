@@ -74,7 +74,8 @@ data = header + question
 
 # print " ".join(hex(ord(c)) for c in data)
 
-message_id, a, b = struct.unpack('!HBB', data[0:4])
+# Exclamation mark means unpack in network order, H means unsigned short, B is byte
+message_id, a, b = struct.unpack('!HBB', data[0:4]) 
 # print "(%s %s)" % (bin(a), bin(b))
 
 # qname, qtype, qclass
@@ -189,12 +190,34 @@ def parse_answer_section(section, whole_response):
 		pointed = whole_response[pointer:]
 		pointed_label_length, pointed_label = parse_label(pointed)
 		print 'Answer section contained pointer to label "' + pointed_label + '"'
-
+		name_length = 2
 	else:
 		print "Not a pointer... not implemented"
 		exit()
 
-	print is_pointer
+	qtype = struct.unpack('!H', section[name_length:name_length + 2])[0]
+	print "Answer section QTYPE:", QTYPES[qtype]
+	record_class = struct.unpack('!H', section[name_length + 2:name_length + 2 + 2])[0]
+	print "Answer section class:", {1:"Internet"}.get(record_class, "Unknown")
+
+	print " ".join(hex(ord(c)) for c in section[name_length + 2 + 2:])
+
+	ttl = struct.unpack('!L', section[name_length + 2 + 2:name_length + 2 + 2 + 4])[0]
+	print "TTL:", ttl, "(time in seconds record may be cached)"
+	rdlength = struct.unpack('!H', section[name_length + 2 + 2 + 4:name_length + 2 + 2 + 4 + 2])[0]
+	print "RDLENGTH:", rdlength, "(RDATA section length)"
+
+	# Now next comes the IP address!
+
+	if QTYPES[qtype] == "A":
+		lip = struct.unpack('!BBBB', section[name_length + 2 + 2 + 4 + 2:name_length + 2 + 2 + 4 + 2 + 4])
+		ip_address = ".".join([str(b) for b in lip])
+		print "\n"
+		print "\t\t", pointed_label, "has IP address", ip_address
+		print "\n"
+	else:
+		print "Answer section parsing for this qtype not implemented"
+		exit()
 
 	# Then comes the TYPE represented as two bytes which is the requested type (A, MX etc.)
 	# And again "Internet" as 0x00 0x01

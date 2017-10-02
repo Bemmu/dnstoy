@@ -7,9 +7,7 @@
 import random
 import struct
 import pprint
-import socket
 
-DNS_PORT = 53
 RCODES = {
 	0: "No error condition.",
 	1: "Format error - The name server was unable to interpret the query.",
@@ -18,6 +16,9 @@ RCODES = {
 	4: "Not Implemented - The name server does not support the requested kind of query.",
 	5: "Refused - The name server refuses to perform the specified operation for policy reasons.  For example, a name server may not wish to provide the information to the particular requester, or a name server may not wish to perform a particular operation (e.g., zone transfer) for particular data."
 }
+for x in range(6, 16): 
+	RCODES[x] = "Reserved for future use."
+
 QTYPES = {
 	0x0001: "A",
 	0x0002: "NS",
@@ -30,10 +31,6 @@ QTYPES = {
 	0x001C: "AAAA"
 }
 QTYPESi = dict((v, k) for k, v in QTYPES.items())
-
-# First 16 bits is an ID for the query, so that responses can be matched
-ID = random.randint(0, 65535) # 16
-print "Picked ID", ID
 
 # Second 16 bits 
 second_fields = [
@@ -48,12 +45,6 @@ second_fields = [
 	(0, 4, 'RCODE') # 4 bits, in responses only, 0 means no error
 ]
 
-# Next values, all 16 bits
-QDCOUNT = 1 # how many questions? 
-ANCOUNT = 0 # how many answers? 
-NSCOUNT = 0 # how many authority records?
-ARCOUNT = 0 # how many additional records?
-
 def pack_bits(field_definitions):
 	bits = 0
 	for i, f in enumerate(field_definitions):
@@ -62,35 +53,29 @@ def pack_bits(field_definitions):
 		bits |= value
 	return bits
 
-header = struct.pack('!HHHHHH', ID, pack_bits(second_fields), QDCOUNT, ANCOUNT, NSCOUNT, ARCOUNT)
+def make_dns_query_packet(query = "google.com."):
 
-query = "google.com."
-qname = "".join([struct.pack('!B', len(label)) + label for label in query.split('.')])
-QTYPE = QTYPESi['A'] # 1 means querying for A record (CNAME is 5, MX is 15)
-qtype = struct.pack('!H', QTYPE)
-QCLASS = 1 # the Internet
-qclass = struct.pack('!H', QCLASS)
+	# First 16 bits is an ID for the query, so that responses can be matched
+	ID = random.randint(0, 65535) # 16
+	print "Picked ID", ID
 
-question = qname + qtype + qclass
+	# Next values, all 16 bits
+	QDCOUNT = 1 # how many questions? 
+	ANCOUNT = 0 # how many answers? 
+	NSCOUNT = 0 # how many authority records?
+	ARCOUNT = 0 # how many additional records?
 
-data = header + question
+	header = struct.pack('!HHHHHH', ID, pack_bits(second_fields), QDCOUNT, ANCOUNT, NSCOUNT, ARCOUNT)
 
-# Exclamation mark means unpack in network order, H means unsigned short, B is byte
-message_id, a, b = struct.unpack('!HBB', data[0:4]) 
+	qname = "".join([struct.pack('!B', len(label)) + label for label in query.split('.')])
+	QTYPE = QTYPESi['A'] # 1 means querying for A record (CNAME is 5, MX is 15)
+	qtype = struct.pack('!H', QTYPE)
+	QCLASS = 1 # the Internet
+	qclass = struct.pack('!H', QCLASS)
 
-# Send the data
-s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-dest = ('8.8.8.8', DNS_PORT)
-s.sendto(data, dest)
+	question = qname + qtype + qclass
 
-s_ip, s_port = s.getsockname()
-print "Sending DNS packet via UDP %s:%s -> %s:%s" % (s_ip, s_port, dest[0], dest[1])
-
-response, addr = s.recvfrom(1024)
-print "Received DNS packet!"
-
-for x in range(6, 16): 
-	RCODES[x] = "Reserved for future use."
+	return header + question
 
 def parse_header(header):
 	message_id, second = struct.unpack('!HH', header[0:4])
@@ -212,6 +197,3 @@ def parse_response(response):
 	# which is why entire response needs to be passed in.
 	parse_answer_section(answer_section, response)
 
-response_hexed = " ".join(hex(ord(c)) for c in response)
-print "Parsing response"
-parse_response(response)

@@ -74,6 +74,7 @@ class PublicDNSServer():
 		return len(self.timestamps) / float(self.falloff_seconds)
 
 	def task_completed(self):
+		print "Task completed"
 		self.current_queries -= 1
 		if self.current_queries < 0:
 			print ""
@@ -95,26 +96,23 @@ map_domains_to_ip_addresses = {}
 def resolve_domains(domain_list):
 	print "Resolving..."
 	while True:
+		timeout.poll()
 		for server in public_dns_servers:
 			server.tick()
 		time.sleep(0.01)
 
-resolve_domains(domain_list)
+# resolve_domains(domain_list)
 
-# def send_nonblocking_packet(data):
-s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-s = AnotherSocket(socket.AF_INET, socket.SOCK_DGRAM)
-s.setblocking(False)
-print s.fileno()
-event = libevent.Event(base, s.fileno(), libevent.EV_READ|libevent.EV_PERSIST, event_ready, s)
-event.add(5)
-dest = ('8.8.8.8', DNS_PORT)
-s_ip, s_port = s.getsockname()
-print "Sending DNS packet via UDP %s:%s -> %s:%s" % (s_ip, s_port, dest[0], dest[1])
-s.sendto(data, dest)
+event = None
 
-# send_nonblocking_packet(data)
+def send_nonblocking_packet(data):
+	global event # Somehow without a global reference, event won't work (issue with reference counting?)
+	s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+	s.setblocking(False)
+	event = libevent.Event(base, s.fileno(), libevent.EV_READ|libevent.EV_PERSIST, event_ready, s)
+	event.add(1)
+	dest = ('8.8.8.8', DNS_PORT)
+	s.sendto(data, dest)
+
+send_nonblocking_packet(data)
 base.loop()
-
-
-

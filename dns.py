@@ -57,7 +57,7 @@ def make_dns_query_packet(query = "google.com."):
 
 	# First 16 bits is an ID for the query, so that responses can be matched
 	ID = random.randint(0, 65535) # 16
-	print "Picked ID", ID
+	# print "Picked ID", ID
 
 	# Next values, all 16 bits
 	QDCOUNT = 1 # how many questions? 

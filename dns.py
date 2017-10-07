@@ -8,6 +8,7 @@ import random
 import struct
 import pprint
 
+RCODE_NAME_ERROR = 3
 RCODES = {
 	0: "No error condition.",
 	1: "Format error - The name server was unable to interpret the query.",
@@ -162,6 +163,8 @@ def parse_answer_section(section, whole_response):
 	rdlength = struct.unpack('!H', section[name_length + 2 + 2 + 4:name_length + 2 + 2 + 4 + 2])[0]
 	print "RDLENGTH:", rdlength, "(RDATA section length)"
 
+	print qtype
+
 	if QTYPES[qtype] == "A":
 		# Now next comes the actual IP address
 		lip = struct.unpack('!BBBB', section[name_length + 2 + 2 + 4 + 2:name_length + 2 + 2 + 4 + 2 + 4])
@@ -169,10 +172,13 @@ def parse_answer_section(section, whole_response):
 		print "\n"
 		print "\t\t", pointed_label, "has IP address", ip_address
 		print "\n"
+	elif QTYPES[qtype] == "SOA":
+		print "Ignoring SOA qtype, this happens when domains don't exist"
 	else:
 		print "Answer section parsing for this qtype not implemented"
 		exit()
 
+# Returns True if domain existed, False if not
 def parse_response(response):
 	id_bytes = 2
 	flag_bytes = 2
@@ -181,7 +187,6 @@ def parse_response(response):
 	header = response[0:header_length]
 	out = parse_header(header)
 
-	print RCODES[out["RCODE"]]
 	print "DNS reply header contents:"
 	pprint.pprint(out, indent = 4)
 
@@ -191,9 +196,13 @@ def parse_response(response):
 	question_section_length = parse_question_section(question_section)
 	print "Question section was", question_section_length, "bytes"
 
+	if out['RCODE'] == RCODE_NAME_ERROR:
+		return False
+
 	answer_section = response[header_length + question_section_length:]
 
 	# Answer section may contain pointers to earlier parts because of compression, 
 	# which is why entire response needs to be passed in.
 	parse_answer_section(answer_section, response)
+	return True
 

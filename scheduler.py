@@ -24,10 +24,12 @@ def event_ready(event, fd, what, s):
 		response, addr = s.recvfrom(1024)
 		response_hexed = " ".join(hex(ord(c)) for c in response)
 		print "Parsing response"
-		dns.parse_response(response)
+		did_domain_exist = dns.parse_response(response)
+		print "Domain did %sexist." % "not " if not did_domain_exist else ""
 
 base = libevent.Base()
-data = dns.make_dns_query_packet("google.com.")
+# data = dns.make_dns_query_packet("google.com.")
+data = dns.make_dns_query_packet("totallynonexistantdomain123434875.com.")
 
 class PublicDNSServer():
 	def __init__(self, ip = '8.8.8.8'):

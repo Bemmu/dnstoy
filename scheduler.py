@@ -11,6 +11,16 @@ import timeout
 import random
 DNS_PORT = 53
 
+domain_list = [
+	"www.google.com.",
+	"google.com.",
+	"yahoo.com"
+]
+
+resolved_ip_addresses = {
+	# "www.google.com" : "1.2.3.4" etc.
+}
+
 # Based on example https://github.com/fancycode/python-libevent/blob/master/samples/hello.py
 def event_ready(event, fd, what, s):
 	print "event_ready"
@@ -34,7 +44,7 @@ data = dns.make_dns_query_packet("totallynonexistantdomain123434875.com.")
 class PublicDNSServer():
 	def __init__(self, ip = '8.8.8.8'):
 		self.ip = ip
-		self.attempt_queries_per_second = 1.0
+		self.queries_per_second = 1.0
 		self.next_attempt_timestamp = 0
 
 		# self.how_many_queries_per_second_can_this_server_resolve
@@ -52,7 +62,7 @@ class PublicDNSServer():
 		now = time.time()
 		if now > self.next_attempt_timestamp:
 			self.task_assigned()
-			self.next_attempt_timestamp = now + 1 / float(self.attempt_queries_per_second)
+			self.next_attempt_timestamp = now + 1 / float(self.queries_per_second)
 
 	def task_timestamp_falloff(self):
 		falloff, now = self.falloff_seconds, time.time()
@@ -61,11 +71,16 @@ class PublicDNSServer():
 		print " -> ",
 		print len(self.timestamps)
 
+	# def resolve_next_domain():
+	# 	domain = domain_list.pop()
+
 	def task_assigned(self):
 		print
 		print "Task assigned"
 		self.current_queries += 1
 		self.timestamps.append(time.time())
+
+		# resolve_next_domain()
 
 		# Simulate response latency
 		delay = random.betavariate(1, 5) # Mostly low latency, sometimes not.
@@ -79,21 +94,14 @@ class PublicDNSServer():
 		print "Task completed"
 		self.current_queries -= 1
 		if self.current_queries < 0:
-			print ""
+			print "Current queries < 0, panic"
+			exit()
 
 public_dns_servers = [
 	PublicDNSServer()
 ]
 
 server = PublicDNSServer()
-
-domain_list = [
-	"www.google.com.",
-	"google.com.",
-	"yahoo.com"
-]
-
-map_domains_to_ip_addresses = {}
 
 def resolve_domains(domain_list):
 	print "Resolving..."
@@ -117,4 +125,8 @@ def send_nonblocking_packet(data):
 	s.sendto(data, dest)
 
 send_nonblocking_packet(data)
-base.loop()
+
+while True:
+	print "Loop..."
+	time.sleep(0.1)
+	base.loop(libevent.EVLOOP_NONBLOCK)

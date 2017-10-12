@@ -9,7 +9,7 @@ import sys
 import time
 import timeout
 import random
-from stub import PublicDNSServer
+from throttle import TaskThrottler
 DNS_PORT = 53
 
 domain_list = [
@@ -43,10 +43,10 @@ base = libevent.Base()
 data = dns.make_dns_query_packet("totallynonexistantdomain123434875.com.")
 
 public_dns_servers = [
-	PublicDNSServer()
+	ThrottledDNSServer()
 ]
 
-server = PublicDNSServer()
+server = ThrottledDNSServer()
 
 def resolve_domains(domain_list):
 	print "Resolving..."

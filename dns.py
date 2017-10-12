@@ -34,7 +34,7 @@ QTYPES = {
 QTYPESi = dict((v, k) for k, v in QTYPES.items())
 
 # Second 16 bits 
-second_fields = [
+flags = [
 	# value, bitcount, description 
 	(0, 1, 'QR'), # (ZERO means YES) message is a query? 1 bit 
 	(0, 4, 'OPCODE'), # standard query, 4 bits
@@ -54,10 +54,11 @@ def pack_bits(field_definitions):
 		bits |= value
 	return bits
 
-def make_dns_query_packet(query = "google.com."):
+def make_dns_query_packet(query = "google.com.", id = None):
 
 	# First 16 bits is an ID for the query, so that responses can be matched
-	ID = random.randint(0, 65535) # 16
+	if not id:
+		ID = random.randint(0, 65535) # 16
 	# print "Picked ID", ID
 
 	# Next values, all 16 bits
@@ -66,7 +67,7 @@ def make_dns_query_packet(query = "google.com."):
 	NSCOUNT = 0 # how many authority records?
 	ARCOUNT = 0 # how many additional records?
 
-	header = struct.pack('!HHHHHH', ID, pack_bits(second_fields), QDCOUNT, ANCOUNT, NSCOUNT, ARCOUNT)
+	header = struct.pack('!HHHHHH', ID, pack_bits(flags), QDCOUNT, ANCOUNT, NSCOUNT, ARCOUNT)
 
 	qname = "".join([struct.pack('!B', len(label)) + label for label in query.split('.')])
 	QTYPE = QTYPESi['A'] # 1 means querying for A record (CNAME is 5, MX is 15)
@@ -86,7 +87,7 @@ def parse_header(header):
 	out = {
 		'id' : message_id
 	}
-	for _, bitlength, field_name in reversed(second_fields):
+	for _, bitlength, field_name in reversed(flags):
 		found = second & (2**bitlength-1)
 		out[field_name] = found
 		second >>= bitlength

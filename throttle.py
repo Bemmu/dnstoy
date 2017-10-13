@@ -1,9 +1,13 @@
 import time
 import sys
 import timeout
+import random
 
 class TaskThrottler():
-	def __init__(self):
+	def __init__(self, run_task_callback, data_to_pass_to_callback):
+		self.run_task_callback = run_task_callback
+		self.data_to_pass_to_callback = data_to_pass_to_callback
+
 		self.throttle_per_second = 1.0
 		self.next_task_timestamp = 0
 
@@ -25,20 +29,21 @@ class TaskThrottler():
 		# Then start off by sending it a task every 1/5 seconds
 		now = time.time()
 		if now > self.next_task_timestamp:
-			self.task_assigned()
+			self._run_task()
 			self.next_task_timestamp = now + 1 / float(self.throttle_per_second)
 
-	def remove_timestamps_beyond_window(self):
+	def _remove_timestamps_beyond_window(self):
 		falloff, now = self.timestamp_window, time.time()
 		self.timestamps = [ts for ts in self.timestamps if now - ts < falloff]
 
 	def current_throughput(self):
-		self.remove_timestamps_beyond_window()
+		self._remove_timestamps_beyond_window()
 		return len(self.timestamps) / float(self.timestamp_window)
 
-	def task_assigned(self):
+	def _run_task(self):
 		print
 		print "Task assigned"
+		self.run_task_callback(self.data_to_pass_to_callback)
 		self.currently_running_task_count += 1
 
 		# Simulate task completion latency

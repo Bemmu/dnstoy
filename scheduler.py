@@ -22,6 +22,18 @@ resolved_ip_addresses = {
 	# "www.google.com" : "1.2.3.4" etc.
 }
 
+def run_task(data):
+	print "Should run next task for %s" % data
+
+t = TaskThrottler(run_task, '8.8.8.8')
+while True:
+	print "Loop..."
+	t.tick()
+	time.sleep(0.1)
+
+exit()
+
+
 # Based on example https://github.com/fancycode/python-libevent/blob/master/samples/hello.py
 def event_ready(event, fd, what, s):
 	print "event_ready"

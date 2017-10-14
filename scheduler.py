@@ -1,38 +1,96 @@
 import sys
 sys.path.append('/Library/Frameworks/Python.framework/Versions/2.7/lib/python2.7/site-packages/python_libevent-0.9.2-py2.7-macosx-10.6-intel.egg')
 
-import socket
-import libevent
-import dns
+from pprint import pprint
+from throttle import TaskThrottler
 import datetime
+import dns
+import libevent
+import random
+import socket
 import sys
 import time
 import timeout
-import random
-from throttle import TaskThrottler
 DNS_PORT = 53
 
 domain_list = [
 	"www.google.com.",
 	"google.com.",
-	"yahoo.com"
+	"yahoo.com."
 ]
 
-resolved_ip_addresses = {
-	# "www.google.com" : "1.2.3.4" etc.
+public_dns_servers = [
+	"8.8.8.8",
+	"1.2.3.4"
+]
+
+domain_state = {
+	# "www.google.com" : {
+	# 	"ip" : "216.58.211.110",
+	# 	"status" : "DONE", # None / "DONE" / "STARTED"
+	# 	"started" : "123456789" # some timestamp
+	# }
 }
 
-def run_task(data):
-	print "Should run next task for %s" % data
+# At first nothing is resolved yet.
+def set_all_domains_to_initial_state():
+	for domain in domain_list:
+		domain_state[domain] = {
+			"ip" : None,
+			"status" : None,
+			"started" : None
+		}
 
-t = TaskThrottler(run_task, '8.8.8.8')
-while True:
-	print "Loop..."
-	t.tick()
-	time.sleep(0.1)
+def domain_resolved(data):
+	domain = data['domain']
+	print "domain_resolved %s" % domain
+	domain_state[domain].update({
+		"status" : "DONE",
+		"ip" : "255.255.255.255"
+	})
+	pprint(domain_state[domain])
+	time.sleep(1)
+	data['callback']()
 
+def run_task(data, task_completed):
+	try:
+		next_domain_to_resolve = domain_list.pop()
+		print "Should run next task %s for %s" % (next_domain_to_resolve, data)
+		task_was_available = True
+
+		# Update domain state so that later if resolution fails we'll know to retry
+		domain_state[next_domain_to_resolve].update({
+			"status" : "STARTED",
+			"started" : time.time()
+		})
+		pprint(domain_state[next_domain_to_resolve])
+
+		# Simulate DNS resolving latency
+		delay = random.betavariate(1, 5) # Mostly low latency, sometimes not.
+		timeout.set(domain_resolved, delay, data = {
+			'callback' : task_completed,
+			'domain' : next_domain_to_resolve
+		})
+
+	except IndexError:
+		print "All domains have been assigned"
+		task_was_available = False
+	return task_was_available
+
+def resolve_all():
+	set_all_domains_to_initial_state()
+	throttlers = dict([(ip, TaskThrottler(run_task, ip)) for ip in public_dns_servers])
+	while not all([ds['status'] == 'DONE' for ds in domain_state.values()]):
+		for ip, throttler in throttlers.items():
+			# print ip, "tick"
+			throttler.tick()
+		time.sleep(0.1)
+		timeout.poll()
+	print ""
+	print "ALL DONE!"
+
+resolve_all()
 exit()
-
 
 # Based on example https://github.com/fancycode/python-libevent/blob/master/samples/hello.py
 def event_ready(event, fd, what, s):

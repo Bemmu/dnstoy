@@ -1,7 +1,5 @@
 import time
 import sys
-import timeout
-import random
 
 class TaskThrottler():
 	def __init__(self, run_task_callback, data_to_pass_to_callback):
@@ -41,14 +39,14 @@ class TaskThrottler():
 		return len(self.timestamps) / float(self.timestamp_window)
 
 	def _run_task(self):
-		print
-		print "Task assigned"
-		self.run_task_callback(self.data_to_pass_to_callback)
-		self.currently_running_task_count += 1
+		task_was_available = self.run_task_callback(self.data_to_pass_to_callback, self.task_completed)
 
-		# Simulate task completion latency
-		delay = random.betavariate(1, 5) # Mostly low latency, sometimes not.
-		timeout.set(self.task_completed, delay)	
+		if task_was_available:
+			print
+			print "Task assigned"
+			self.currently_running_task_count += 1
+		else:
+			print "No task was available"
 
 	def task_completed(self):
 		self.timestamps.append(time.time())

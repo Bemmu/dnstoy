@@ -13,6 +13,8 @@ import time
 import timeout
 DNS_PORT = 53
 
+base = libevent.Base()
+
 domain_list = [
 	"www.google.com.",
 	"google.com.",
@@ -21,7 +23,7 @@ domain_list = [
 
 public_dns_servers = [
 	"8.8.8.8",
-	"1.2.3.4"
+	# "1.2.3.4"
 ]
 
 domain_state = {
@@ -52,10 +54,24 @@ def domain_resolved(data):
 	time.sleep(1)
 	data['callback']()
 
-def run_task(data, task_completed):
+# event = None
+
+events = [] # just for reference counting issue with libevent
+
+def send_nonblocking_packet(data, ip_address = '8.8.8.8'):
+	# global event # Somehow without a global reference, event won't work (issue with reference counting?)
+	s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+	s.setblocking(False)
+	event = libevent.Event(base, s.fileno(), libevent.EV_READ|libevent.EV_PERSIST, event_ready, s)
+	event.add(1)
+	events.append(event)
+	dest = (ip_address, DNS_PORT)
+	s.sendto(data, dest)
+
+def run_task(dns_server, task_completed_callback):
 	try:
 		next_domain_to_resolve = domain_list.pop()
-		print "Should run next task %s for %s" % (next_domain_to_resolve, data)
+		print "Should run next task %s for %s" % (next_domain_to_resolve, dns_server)
 		task_was_available = True
 
 		# Update domain state so that later if resolution fails we'll know to retry
@@ -65,12 +81,16 @@ def run_task(data, task_completed):
 		})
 		pprint(domain_state[next_domain_to_resolve])
 
+		# Should send DNS packet to resolve next_domain_to_resolve with dns_server
+		packet = dns.make_dns_query_packet(next_domain_to_resolve)
+		send_nonblocking_packet(packet, dns_server)
+
 		# Simulate DNS resolving latency
-		delay = random.betavariate(1, 5) # Mostly low latency, sometimes not.
-		timeout.set(domain_resolved, delay, data = {
-			'callback' : task_completed,
-			'domain' : next_domain_to_resolve
-		})
+		# delay = random.betavariate(1, 5) # Mostly low latency, sometimes not.
+		# timeout.set(domain_resolved, delay, data = {
+		# 	'callback' : task_completed_callback,
+		# 	'domain' : next_domain_to_resolve
+		# })
 
 	except IndexError:
 		print "All domains have been assigned"
@@ -86,19 +106,22 @@ def resolve_all():
 			throttler.tick()
 		time.sleep(0.1)
 		timeout.poll()
+
+		# NONBLOCK means return immediately if no events available
+		# EVLOOP_NO_EXIT_ON_EMPTY would mean block indefinitely even if no events available
+		base.loop(libevent.EVLOOP_NONBLOCK)
+
 	print ""
 	print "ALL DONE!"
 
-resolve_all()
-exit()
 
 # Based on example https://github.com/fancycode/python-libevent/blob/master/samples/hello.py
 def event_ready(event, fd, what, s):
 	print "event_ready"
 
-	if what & libevent.EV_TIMEOUT:
-		print "Timeout"
-		exit()
+	# if what & libevent.EV_TIMEOUT:
+	# 	print "Timeout"
+	# 	exit()
 
 	if what & libevent.EV_READ:
 		print "Received DNS packet!"
@@ -108,43 +131,5 @@ def event_ready(event, fd, what, s):
 		did_domain_exist = dns.parse_response(response)
 		print "Domain did %sexist." % "not " if not did_domain_exist else ""
 
-base = libevent.Base()
-# data = dns.make_dns_query_packet("google.com.")
-data = dns.make_dns_query_packet("totallynonexistantdomain123434875.com.")
+resolve_all()
 
-public_dns_servers = [
-	ThrottledDNSServer()
-]
-
-server = ThrottledDNSServer()
-
-def resolve_domains(domain_list):
-	print "Resolving..."
-	while True:
-		timeout.poll()
-		for server in public_dns_servers:
-			server.tick()
-		time.sleep(0.01)
-
-# resolve_domains(domain_list)
-
-event = None
-
-def send_nonblocking_packet(data):
-	global event # Somehow without a global reference, event won't work (issue with reference counting?)
-	s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-	s.setblocking(False)
-	event = libevent.Event(base, s.fileno(), libevent.EV_READ|libevent.EV_PERSIST, event_ready, s)
-	event.add(1)
-	dest = ('8.8.8.8', DNS_PORT)
-	s.sendto(data, dest)
-
-send_nonblocking_packet(data)
-
-while True:
-	print "Loop..."
-	time.sleep(0.1)
-
-	# NONBLOCK means return immediately if no events available
-	# EVLOOP_NO_EXIT_ON_EMPTY would mean block indefinitely even if no events available
-	base.loop(libevent.EVLOOP_NONBLOCK)

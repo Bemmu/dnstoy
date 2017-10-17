@@ -111,8 +111,9 @@ def resolve_all():
 		# EVLOOP_NO_EXIT_ON_EMPTY would mean block indefinitely even if no events available
 		base.loop(libevent.EVLOOP_NONBLOCK)
 
-	print ""
-	print "ALL DONE!"
+	print
+	print
+	print "ALL DONE:"
 
 
 # Based on example https://github.com/fancycode/python-libevent/blob/master/samples/hello.py
@@ -128,8 +129,21 @@ def event_ready(event, fd, what, s):
 		response, addr = s.recvfrom(1024)
 		response_hexed = " ".join(hex(ord(c)) for c in response)
 		print "Parsing response"
-		did_domain_exist = dns.parse_response(response)
+		did_domain_exist, domain, ip_address = dns.parse_response(response)
 		print "Domain did %sexist." % "not " if not did_domain_exist else ""
+		print "Domain in question was %s." % domain
+
+		if not did_domain_exist:
+			print "Domain not existing not implemented yet!"
+			exit()
+
+		domain_state[domain + '.'].update({
+			'ip' : ip_address,
+			'status' : 'DONE'
+		})
+		print "Updated state for '%s'" % domain
 
 resolve_all()
+for domain, state in domain_state.items():
+	print "%s\t%s" % (domain, state['ip'])
 

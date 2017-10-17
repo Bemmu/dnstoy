@@ -179,6 +179,8 @@ def parse_answer_section(section, whole_response):
 		print "Answer section parsing for this qtype not implemented"
 		exit()
 
+	return pointed_label, ip_address
+
 # Returns True if domain existed, False if not
 def parse_response(response):
 	id_bytes = 2
@@ -198,12 +200,12 @@ def parse_response(response):
 	print "Question section was", question_section_length, "bytes"
 
 	if out['RCODE'] == RCODE_NAME_ERROR:
-		return False
+		return False, None, None
 
 	answer_section = response[header_length + question_section_length:]
 
 	# Answer section may contain pointers to earlier parts because of compression, 
 	# which is why entire response needs to be passed in.
-	parse_answer_section(answer_section, response)
-	return True
+	domain, ip_address = parse_answer_section(answer_section, response)
+	return True, domain, ip_address
 

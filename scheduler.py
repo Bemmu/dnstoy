@@ -16,6 +16,7 @@ DNS_PORT = 53
 base = libevent.Base()
 
 domain_list = [
+	"totallynonexistant54312124.com.",
 	"www.google.com.",
 	"google.com.",
 	"yahoo.com."
@@ -29,7 +30,7 @@ public_dns_servers = [
 domain_state = {
 	# "www.google.com" : {
 	# 	"ip" : "216.58.211.110",
-	# 	"status" : "DONE", # None / "DONE" / "STARTED"
+	# 	"status" : "DONE", # "DIDNOTEXIST" / "DONE" / "STARTED"
 	# 	"started" : "123456789" # some timestamp
 	# }
 }
@@ -100,7 +101,7 @@ def run_task(dns_server, task_completed_callback):
 def resolve_all():
 	set_all_domains_to_initial_state()
 	throttlers = dict([(ip, TaskThrottler(run_task, ip)) for ip in public_dns_servers])
-	while not all([ds['status'] == 'DONE' for ds in domain_state.values()]):
+	while not all([ds['status'] in ['DONE', 'DIDNOTEXIST'] for ds in domain_state.values()]):
 		for ip, throttler in throttlers.items():
 			# print ip, "tick"
 			throttler.tick()
@@ -115,16 +116,12 @@ def resolve_all():
 	print
 	print "ALL DONE:"
 
-
-# Based on example https://github.com/fancycode/python-libevent/blob/master/samples/hello.py
-def event_ready(event, fd, what, s):
-	print "event_ready"
-
-	# if what & libevent.EV_TIMEOUT:
+def event_ready(event, fd, type_of_event, s):
+	# if type_of_event & libevent.EV_TIMEOUT:
 	# 	print "Timeout"
 	# 	exit()
 
-	if what & libevent.EV_READ:
+	if type_of_event & libevent.EV_READ:
 		print "Received DNS packet!"
 		response, addr = s.recvfrom(1024)
 		response_hexed = " ".join(hex(ord(c)) for c in response)
@@ -133,17 +130,23 @@ def event_ready(event, fd, what, s):
 		print "Domain did %sexist." % "not " if not did_domain_exist else ""
 		print "Domain in question was %s." % domain
 
-		if not did_domain_exist:
-			print "Domain not existing not implemented yet!"
-			exit()
-
-		domain_state[domain + '.'].update({
-			'ip' : ip_address,
-			'status' : 'DONE'
-		})
+		state = domain_state[domain + '.']
+		if did_domain_exist:
+			state.update({
+				'ip' : ip_address,
+				'status' : 'DONE'
+			})
+		else:
+			state.update({
+				'status' : 'DIDNOTEXIST'
+			})
 		print "Updated state for '%s'" % domain
 
 resolve_all()
 for domain, state in domain_state.items():
-	print "%s\t%s" % (domain, state['ip'])
+	if state['status'] == 'DONE':
+		print "%s\t%s" % (domain, state['ip'])
+	if state['status'] == 'DIDNOTEXIST':
+		print "%s\t%s" % (domain, '-')
+
 

@@ -33,6 +33,8 @@ domain_state = {
 	# }
 }
 
+throttlers = None
+
 # At first nothing is resolved yet.
 def set_all_domains_to_initial_state():
 	for domain in domain_list:
@@ -101,13 +103,25 @@ def all_done():
 	return all([s['status'] in ['DONE', 'DIDNOTEXIST'] for s in states])
 
 def print_progress():
+	"""Print % of domains checked"""
 	states = domain_state.values()
 	done_count = sum([s['status'] in ['DONE', 'DIDNOTEXIST'] for s in states])
 	total_count = len(states)
 	percentage = done_count * 100.0 / total_count
-	print "%.4f%% done" % percentage
+
+def print_throughput(throttlers):
+	"""Print how fast each domain name server is"""
+
+	print
+	print
+
+	# Print throughput of each server
+	print "Current throughput (in domains resolved per second):"
+	for dns_ip, throttler in throttlers.items():
+		print "%s\t%.2f DPS" % (dns_ip, throttler.current_throughput())
 
 def resolve_all():
+	global throttlers
 	set_all_domains_to_initial_state()
 	throttlers = dict([(ip, TaskThrottler(run_task, ip)) for ip in public_dns_servers])
 	while not all_done():
@@ -116,6 +130,8 @@ def resolve_all():
 			throttler.tick()
 		time.sleep(0.1)
 		timeout.poll()
+
+		print_throughput(throttlers)
 
 		# NONBLOCK means return immediately if no events available
 		# EVLOOP_NO_EXIT_ON_EMPTY would mean block indefinitely even if no events available
@@ -131,8 +147,13 @@ def event_ready(event, fd, type_of_event, s):
 	# 	exit()
 
 	if type_of_event & libevent.EV_READ:
-		print "Received DNS packet!"
 		response, addr = s.recvfrom(1024)
+		server_ip = addr[0]
+		print "Received DNS packet from %s!" % server_ip
+
+		# import code
+		# code.InteractiveConsole(locals=locals()).interact()
+
 		response_hexed = " ".join(hex(ord(c)) for c in response)
 		print "Parsing response"
 		did_domain_exist, domain, ip_address = dns.parse_response(response)
@@ -149,6 +170,10 @@ def event_ready(event, fd, type_of_event, s):
 			state.update({
 				'status' : 'DIDNOTEXIST'
 			})
+
+		throttlers[server_ip].task_completed()
+#		task_completed
+
 		print "Updated state for '%s'" % domain
 		print_progress()
 

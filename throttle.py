@@ -18,7 +18,7 @@ class TaskThrottler():
 
 		# This is how many seconds worth of data we'll consider when deciding
 		# the current throughput.
-		self.timestamp_window = 60 # n
+		self.timestamp_window = 10 # n
 
 	def tick(self):
 		sys.stdout.write(".")
@@ -35,6 +35,7 @@ class TaskThrottler():
 		self.timestamps = [ts for ts in self.timestamps if now - ts < falloff]
 
 	def current_throughput(self):
+		print self.timestamps
 		self._remove_timestamps_beyond_window()
 		return len(self.timestamps) / float(self.timestamp_window)
 

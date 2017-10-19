@@ -15,12 +15,10 @@ DNS_PORT = 53
 
 base = libevent.Base()
 
-domain_list = [
-	"totallynonexistant54312124.com.",
-	"www.google.com.",
-	"google.com.",
-	"yahoo.com."
-]
+# Use top 1 million domains as test data
+print "Reading domain list..."
+domain_list = [l.split(",")[1].strip()+"." for l in open('opendns-top-1m.csv')]
+print "Read domain list."
 
 public_dns_servers = [
 	"8.8.8.8",
@@ -98,10 +96,21 @@ def run_task(dns_server, task_completed_callback):
 		task_was_available = False
 	return task_was_available
 
+def all_done():
+	states = domain_state.values()
+	return all([s['status'] in ['DONE', 'DIDNOTEXIST'] for s in states])
+
+def print_progress():
+	states = domain_state.values()
+	done_count = sum([s['status'] in ['DONE', 'DIDNOTEXIST'] for s in states])
+	total_count = len(states)
+	percentage = done_count * 100.0 / total_count
+	print "%.4f%% done" % percentage
+
 def resolve_all():
 	set_all_domains_to_initial_state()
 	throttlers = dict([(ip, TaskThrottler(run_task, ip)) for ip in public_dns_servers])
-	while not all([ds['status'] in ['DONE', 'DIDNOTEXIST'] for ds in domain_state.values()]):
+	while not all_done():
 		for ip, throttler in throttlers.items():
 			# print ip, "tick"
 			throttler.tick()
@@ -141,6 +150,7 @@ def event_ready(event, fd, type_of_event, s):
 				'status' : 'DIDNOTEXIST'
 			})
 		print "Updated state for '%s'" % domain
+		print_progress()
 
 resolve_all()
 for domain, state in domain_state.items():

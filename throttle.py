@@ -1,16 +1,16 @@
 import time
 import sys
+import math
 
 class TaskThrottler():
 	def __init__(self, run_task_callback, data_to_pass_to_callback):
 		self.run_task_callback = run_task_callback
 		self.data_to_pass_to_callback = data_to_pass_to_callback
 
-		self.throttle_per_second = 1.0
-		self.next_task_timestamp = 0
+		self.throttle_per_second = 2.0
+		self.prev_task_timestamp = time.time() - 1 / float(self.throttle_per_second)
 
 		self.currently_running_task_count = 0
-		self.latest_query_timestamp = None
 
 		# Keep track of past of when each task was completed, so we can know
 		# how many are getting resolved per second. 
@@ -23,19 +23,22 @@ class TaskThrottler():
 	def tick(self):
 		sys.stdout.write(".")
 		sys.stdout.flush()
-		# If server resolve say 5 domains per second
-		# Then start off by sending it a task every 1/5 seconds
-		now = time.time()
-		if now > self.next_task_timestamp:
-			self._run_task()
-			self.next_task_timestamp = now + 1 / float(self.throttle_per_second)
+
+		# How many tasks should we have run since we last checked?
+		elapsed = time.time() - self.prev_task_timestamp
+		tasks_to_run = int(math.floor(elapsed * self.throttle_per_second))
+
+		# Run 'em
+		if tasks_to_run >= 1:
+			self.prev_task_timestamp = time.time()
+			for _ in range(0, tasks_to_run):
+				self._run_task()
 
 	def _remove_timestamps_beyond_window(self):
 		falloff, now = self.timestamp_window, time.time()
 		self.timestamps = [ts for ts in self.timestamps if now - ts < falloff]
 
 	def current_throughput(self):
-		print self.timestamps
 		self._remove_timestamps_beyond_window()
 		return len(self.timestamps) / float(self.timestamp_window)
 

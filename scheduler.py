@@ -34,6 +34,10 @@ domain_state = {
 	# }
 }
 
+# List of domains that are in STARTED state, for a quicker
+# lookup when scanning for stalled domains.
+started_domains = []
+
 throttlers = None
 
 # At first nothing is resolved yet.
@@ -45,13 +49,12 @@ def set_all_domains_to_initial_state():
 			"started" : None
 		}
 
-# If haven't gotten a response, try again.
-def retry_stalled():
-	for domain, state in domain_state.items():
-		if state['status'] != 'STARTED':
-			continue
-
-		elapsed = time.time() - state['started']
+# Haven't gotten a response? Try again.
+def make_stalled_domains_get_retried_later():
+	for domain in started_domains:
+		# If took too long, reset to initial state, which will 
+		# make this domain get retried at a later point.
+		elapsed = time.time() - domain_state[domain]['started']
 		if elapsed > RETRY_THRESHOLD:
 			domain_state[domain] = {
 				"ip" : None,
@@ -97,6 +100,7 @@ def run_task(dns_server, task_completed_callback):
 			"status" : "STARTED",
 			"started" : time.time()
 		})
+		started_domains.append(next_domain_to_resolve)
 		pprint(domain_state[next_domain_to_resolve])
 
 		# Should send DNS packet to resolve next_domain_to_resolve with dns_server
@@ -125,6 +129,7 @@ def print_progress():
 	done_count = sum([s['status'] in ['DONE', 'DIDNOTEXIST'] for s in states])
 	total_count = len(states)
 	percentage = done_count * 100.0 / total_count
+	print "%.5f%% of domains checked" % percentage
 
 def print_throughput(throttlers):
 	"""Print how fast each domain name server is"""
@@ -149,7 +154,8 @@ def resolve_all():
 		timeout.poll()
 
 		print_throughput(throttlers)
-		retry_stalled()
+		print_progress()
+		make_stalled_domains_get_retried_later()
 
 		# NONBLOCK means return immediately if no events available
 		# EVLOOP_NO_EXIT_ON_EMPTY would mean block indefinitely even if no events available
@@ -188,12 +194,11 @@ def event_ready(event, fd, type_of_event, s):
 			state.update({
 				'status' : 'DIDNOTEXIST'
 			})
+		started_domains.remove(domain + '.')
 
 		throttlers[server_ip].task_completed()
 #		task_completed
 
-		print "Updated state for '%s'" % domain
-		print_progress()
 
 resolve_all()
 for domain, state in domain_state.items():

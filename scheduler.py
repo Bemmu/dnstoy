@@ -12,6 +12,7 @@ import sys
 import time
 import timeout
 DNS_PORT = 53
+RETRY_THRESHOLD = 10 # seconds
 
 base = libevent.Base()
 
@@ -44,6 +45,21 @@ def set_all_domains_to_initial_state():
 			"started" : None
 		}
 
+# If haven't gotten a response, try again.
+def retry_stalled():
+	for domain, state in domain_state.items():
+		if state['status'] != 'STARTED':
+			continue
+
+		elapsed = time.time() - state['started']
+		if elapsed > RETRY_THRESHOLD:
+			domain_state[domain] = {
+				"ip" : None,
+				"status" : None,
+				"started" : None
+			}
+			domain_list.append(domain)
+
 def domain_resolved(data):
 	domain = data['domain']
 	print "domain_resolved %s" % domain
@@ -70,8 +86,9 @@ def send_nonblocking_packet(data, ip_address = '8.8.8.8'):
 	s.sendto(data, dest)
 
 def run_task(dns_server, task_completed_callback):
-	try:
+	try:		
 		next_domain_to_resolve = domain_list.pop()
+
 		print "Should run next task %s for %s" % (next_domain_to_resolve, dns_server)
 		task_was_available = True
 
@@ -132,6 +149,7 @@ def resolve_all():
 		timeout.poll()
 
 		print_throughput(throttlers)
+		retry_stalled()
 
 		# NONBLOCK means return immediately if no events available
 		# EVLOOP_NO_EXIT_ON_EMPTY would mean block indefinitely even if no events available

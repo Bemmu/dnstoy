@@ -10,7 +10,6 @@ import random
 import socket
 import sys
 import time
-import timeout
 DNS_PORT = 53
 RETRY_THRESHOLD = 10 # seconds
 
@@ -74,8 +73,6 @@ def domain_resolved(data):
 	time.sleep(1)
 	data['callback']()
 
-# event = None
-
 events = [] # just for reference counting issue with libevent
 
 def send_nonblocking_packet(data, ip_address = '8.8.8.8'):
@@ -106,13 +103,6 @@ def run_task(dns_server, task_completed_callback):
 		# Should send DNS packet to resolve next_domain_to_resolve with dns_server
 		packet = dns.make_dns_query_packet(next_domain_to_resolve)
 		send_nonblocking_packet(packet, dns_server)
-
-		# Simulate DNS resolving latency
-		# delay = random.betavariate(1, 5) # Mostly low latency, sometimes not.
-		# timeout.set(domain_resolved, delay, data = {
-		# 	'callback' : task_completed_callback,
-		# 	'domain' : next_domain_to_resolve
-		# })
 
 	except IndexError:
 		print "All domains have been assigned"
@@ -151,7 +141,6 @@ def resolve_all():
 			# print ip, "tick"
 			throttler.tick()
 		time.sleep(0.1)
-		timeout.poll()
 
 		print_throughput(throttlers)
 		print_progress()

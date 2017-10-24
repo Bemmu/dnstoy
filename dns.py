@@ -175,6 +175,7 @@ def parse_answer_section(section, whole_response):
 		print "\n"
 	elif QTYPES[qtype] == "SOA":
 		print "Ignoring SOA qtype, this happens when domains don't exist"
+		exit()
 	else:
 		print "Answer section parsing for this qtype not implemented"
 		exit()

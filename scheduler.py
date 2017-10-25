@@ -140,6 +140,12 @@ def resolve_all():
 		for ip, throttler in throttlers.items():
 			# print ip, "tick"
 			throttler.tick()
+
+			#if throttler.current_throughput() > 
+			no_errors_recently = True
+			if no_errors_recently:
+				throttler.faster() # Things seem to be going well, try using this server more
+
 		time.sleep(0.1)
 
 		print_throughput(throttlers)

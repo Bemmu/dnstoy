@@ -174,8 +174,9 @@ def parse_answer_section(section, whole_response):
 		print "\t\t", pointed_label, "has IP address", ip_address
 		print "\n"
 	elif QTYPES[qtype] == "SOA":
-		print "Ignoring SOA qtype, this happens when domains don't exist"
-		exit()
+		print "Ignoring SOA qtype, this happens when domains don't exist" # happens for example for mew-s.jp
+		return False
+		# exit()
 	else:
 		print "Answer section parsing for this qtype not implemented"
 		exit()
@@ -208,5 +209,8 @@ def parse_response(response):
 	# Answer section may contain pointers to earlier parts because of compression, 
 	# which is why entire response needs to be passed in.
 	ip_address = parse_answer_section(answer_section, response)
-	return True, domain, ip_address
+	if not ip_address:
+		return False, domain, None
+	else:
+		return True, domain, ip_address
 

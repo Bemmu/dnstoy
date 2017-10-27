@@ -164,6 +164,8 @@ def parse_answer_section(section, whole_response):
 	rdlength = struct.unpack('!H', section[name_length + 2 + 2 + 4:name_length + 2 + 2 + 4 + 2])[0]
 	print "RDLENGTH:", rdlength, "(RDATA section length)"
 
+	total_length = name_length + 2 + 2 + 4 + 2 + rdlength
+
 	print qtype
 
 	if QTYPES[qtype] == "A":
@@ -177,11 +179,14 @@ def parse_answer_section(section, whole_response):
 		print "Ignoring SOA qtype, this happens when domains don't exist" # happens for example for mew-s.jp
 		return False
 		# exit()
+	elif QTYPES[qtype] == "CNAME":
+		print "Oh, it's a CNAME, probably pointing to another field in the answer section. Not implemented yet!"
+		exit()
 	else:
-		print "Answer section parsing for this qtype not implemented"
+		print "Answer section parsing for this qtype %s not implemented" % QTYPES[qtype]
 		exit()
 
-	return ip_address
+	return total_length, ip_address
 
 # Returns True if domain existed, False if not
 def parse_response(response):
@@ -204,11 +209,31 @@ def parse_response(response):
 	if out['RCODE'] == RCODE_NAME_ERROR:
 		return False, domain, None
 
-	answer_section = response[header_length + question_section_length:]
+	answer_section_count = out['ANCOUNT'][0]
+
 
 	# Answer section may contain pointers to earlier parts because of compression, 
 	# which is why entire response needs to be passed in.
-	ip_address = parse_answer_section(answer_section, response)
+
+	answer_section_offset = 0
+	for i in range(0, answer_section_count):
+
+		print
+		print
+		print "--------------------------------"
+		print "Parsing answer section number %s" % i
+		answer_section = response[header_length + question_section_length + answer_section_offset:]
+		answer_section_length, ip_address = parse_answer_section(answer_section, response)
+		answer_section_offset += answer_section_length
+		print "--------------------------------"
+		print
+		print
+
+	if answer_section_count > 1:
+		print "Debug end, fixme"
+		exit()
+
+	# Now this is broken!
 	if not ip_address:
 		return False, domain, None
 	else:

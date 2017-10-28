@@ -180,13 +180,16 @@ def parse_answer_section(section, whole_response):
 		return False
 		# exit()
 	elif QTYPES[qtype] == "CNAME":
+		# For a CNAME, RDATA would be the result?
+		rdata = section[name_length + 2 + 2 + 4 + 2:name_length + 2 + 2 + 4 + 2 + rdlength]
+		print pointed_label, "-->", parse_label(rdata)[1]
 		print "Oh, it's a CNAME, probably pointing to another field in the answer section. Not implemented yet!"
 		exit()
 	else:
 		print "Answer section parsing for this qtype %s not implemented" % QTYPES[qtype]
 		exit()
 
-	return total_length, ip_address
+	return total_length, QTYPES[qtype], ip_address
 
 # Returns True if domain existed, False if not
 def parse_response(response):
@@ -212,9 +215,7 @@ def parse_response(response):
 	answer_section_count = out['ANCOUNT'][0]
 
 
-	# Answer section may contain pointers to earlier parts because of compression, 
-	# which is why entire response needs to be passed in.
-
+	ip_address = None
 	answer_section_offset = 0
 	for i in range(0, answer_section_count):
 
@@ -223,15 +224,23 @@ def parse_response(response):
 		print "--------------------------------"
 		print "Parsing answer section number %s" % i
 		answer_section = response[header_length + question_section_length + answer_section_offset:]
-		answer_section_length, ip_address = parse_answer_section(answer_section, response)
+
+		# Answer section may contain pointers to earlier parts because of compression, 
+		# which is why entire response needs to be passed in.
+		answer_section_length, qtype, ip_address = parse_answer_section(answer_section, response)
+
+		if qtype == 'CNAME':
+			print "Got CNAME, pausing here"
+			exit()
+
 		answer_section_offset += answer_section_length
 		print "--------------------------------"
 		print
 		print
 
-	if answer_section_count > 1:
-		print "Debug end, fixme"
-		exit()
+	# if answer_section_count > 1:
+	# 	print "Debug end, fixme"
+	# 	exit()
 
 	# Now this is broken!
 	if not ip_address:

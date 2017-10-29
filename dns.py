@@ -175,6 +175,7 @@ def parse_answer_section(section, whole_response):
 		print "\n"
 		print "\t\t", pointed_label, "has IP address", ip_address
 		print "\n"
+		return total_length, QTYPES[qtype], pointed_label, ip_address, None
 	elif QTYPES[qtype] == "SOA":
 		print "Ignoring SOA qtype, this happens when domains don't exist" # happens for example for mew-s.jp
 		return False
@@ -182,6 +183,10 @@ def parse_answer_section(section, whole_response):
 	elif QTYPES[qtype] == "CNAME":
 		# For a CNAME, RDATA would be the result?
 		rdata = section[name_length + 2 + 2 + 4 + 2:name_length + 2 + 2 + 4 + 2 + rdlength]
+		parsed_rdata = parse_label(rdata)[1]
+
+		return total_length, QTYPES[qtype], pointed_label, None, parsed_rdata
+
 		print pointed_label, "-->", parse_label(rdata)[1]
 		print "Oh, it's a CNAME, probably pointing to another field in the answer section. Not implemented yet!"
 		exit()
@@ -189,7 +194,6 @@ def parse_answer_section(section, whole_response):
 		print "Answer section parsing for this qtype %s not implemented" % QTYPES[qtype]
 		exit()
 
-	return total_length, QTYPES[qtype], ip_address
 
 # Returns True if domain existed, False if not
 def parse_response(response):
@@ -217,6 +221,10 @@ def parse_response(response):
 
 	ip_address = None
 	answer_section_offset = 0
+
+	labels_to_cnames = {}
+	labels_to_ip_addresses = {}
+
 	for i in range(0, answer_section_count):
 
 		print
@@ -227,16 +235,27 @@ def parse_response(response):
 
 		# Answer section may contain pointers to earlier parts because of compression, 
 		# which is why entire response needs to be passed in.
-		answer_section_length, qtype, ip_address = parse_answer_section(answer_section, response)
+		answer_section_length, qtype, label, ip_address, rdata = parse_answer_section(answer_section, response)
 
 		if qtype == 'CNAME':
-			print "Got CNAME, pausing here"
-			exit()
+			labels_to_cnames[label] = rdata
+			print "Remembering CNAME %s --> %s" % (label, rdata)
+
+		if qtype == 'A':
+			labels_to_ip_addresses[label] = ip_address
+			print "Remembering IP address for %s is %s" % (label, ip_address)
 
 		answer_section_offset += answer_section_length
 		print "--------------------------------"
 		print
 		print
+
+	# If there was a CNAME for the desired label, check if we got the IP address for that CNAME.
+	if domain in labels_to_cnames:
+		cname = labels_to_cnames[domain]
+		print "Domain %s had CNAME %s" % (domain, cname)
+		ip_address = labels_to_ip_addresses[cname]
+		print "The domain that CNAME pointed to had ip address %s" % ip_address
 
 	# if answer_section_count > 1:
 	# 	print "Debug end, fixme"

@@ -17,7 +17,8 @@ base = libevent.Base()
 
 # Use top 1 million domains as test data
 print "Reading domain list..."
-domain_list = [l.split(",")[1].strip()+"." for l in open('opendns-top-1m.csv')]
+# domain_list = [l.split(",")[1].strip()+"." for l in open('opendns-top-1m.csv')]
+domain_list = ['the-epic-outfitter.myshopify.com.']
 print "Read domain list."
 
 public_dns_servers = [

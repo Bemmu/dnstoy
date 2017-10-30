@@ -101,15 +101,36 @@ def parse_header(header):
 	return out
 
 def parse_label(chunk):
+	print "Parsing chunk %s: %s" % (chunk, ["0x%x" % ord(ch) for ch in chunk])
+
+
 	# Length of string, followed by actual string bytes for each part of domain name ("label").
 	# Zero length label means end of domain name.
 	i = 0
 	parts = []
 	while True:
 		part_length = ord(chunk[i])
+		print "Part length is %s" % part_length
 		if part_length == 0:
 			break
-		parts.append(chunk[i+1:i+1+part_length])
+
+		# 4.1.4. Message compression
+		# If first two bits of a character are one, then it's a pointer.
+
+		# For example a CNAME in the response from @8.8.8.8 for "" contains this at one point
+		# '0x5', '0x73', '0x68', '0x6f', '0x70', '0x73', '0xc0',   '0x1f'
+		#    5       s       h       o       p       s   11000000  00011111
+
+		print "Chunk[i + 0] is %s" % bin(ord(chunk[i+0]))
+		print "Chunk[i + 1] is %s" % bin(ord(chunk[i+1]))
+		if ord(chunk[i]) & 0b1100000:
+			pointer = ((0b00111111 & ord(chunk[i + 0])) << 8) | (ord(chunk[i + 1]))
+			print "Encountered pointer to %d while decoding label -- not implemented yet." % pointer
+			exit()
+
+		part = chunk[i+1:i+1+part_length]
+		print "Part is *%s*" % part
+		parts.append(part)
 		i += part_length + 1
 	i += 1
 	return i, ".".join(parts)
@@ -119,6 +140,7 @@ def parse_label(chunk):
 def parse_question_section(section):
 	print "Parsing question section"
 
+	print "Calling parse_label from parse_question_section"
 	bytes_read, domain_name = parse_label(section)
 	qtype, qclass = struct.unpack('!HH', section[bytes_read:bytes_read+4])
 
@@ -143,6 +165,7 @@ def parse_answer_section(section, whole_response):
 	if is_pointer:
 		pointer = first_16_bits & 0b0011111111111111
 		pointed = whole_response[pointer:]
+		print "Calling parse_label from parse_answer_section (if)"
 		pointed_label_length, pointed_label = parse_label(pointed)
 		print 'Answer section contained pointer to label "' + pointed_label + '"'
 		name_length = 2
@@ -183,6 +206,7 @@ def parse_answer_section(section, whole_response):
 	elif QTYPES[qtype] == "CNAME":
 		# For a CNAME, RDATA would be the result?
 		rdata = section[name_length + 2 + 2 + 4 + 2:name_length + 2 + 2 + 4 + 2 + rdlength]
+		print "Calling parse_label from parse_answer_section (type CNAME rdata)"
 		parsed_rdata = parse_label(rdata)[1]
 
 		return total_length, QTYPES[qtype], pointed_label, None, parsed_rdata
@@ -197,6 +221,8 @@ def parse_answer_section(section, whole_response):
 
 # Returns True if domain existed, False if not
 def parse_response(response):
+	print "Response length is %d bytes" % len(response)
+
 	id_bytes = 2
 	flag_bytes = 2
 	count_bytes = 2 * 4

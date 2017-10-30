@@ -100,9 +100,8 @@ def parse_header(header):
 	})
 	return out
 
-def parse_label(chunk):
-	print "Parsing chunk %s: %s" % (chunk, ["0x%x" % ord(ch) for ch in chunk])
-
+def parse_label(chunk, whole_response):
+	print "Parsing chunk %s" % (["0x%x" % ord(ch) for ch in chunk])
 
 	# Length of string, followed by actual string bytes for each part of domain name ("label").
 	# Zero length label means end of domain name.
@@ -125,10 +124,15 @@ def parse_label(chunk):
 		print "Chunk[i + 1] is %s" % bin(ord(chunk[i+1]))
 		if ord(chunk[i]) & 0b1100000:
 			pointer = ((0b00111111 & ord(chunk[i + 0])) << 8) | (ord(chunk[i + 1]))
-			print "Encountered pointer to %d while decoding label -- not implemented yet." % pointer
-			exit()
+			pointed_parts = parse_label(whole_response[pointer:], whole_response)
+			print "Label contained pointer %d to %s?" % (pointer, pointed_parts[1])
 
-		part = chunk[i+1:i+1+part_length]
+			# RFC 1035 says that if there is a pointer, then that ends the parts list, so can stop here.
+			return i, ".".join(parts) + "." + pointed_parts[1]
+
+			exit()
+		else:
+			part = chunk[i+1:i+1+part_length]
 		print "Part is *%s*" % part
 		parts.append(part)
 		i += part_length + 1
@@ -137,11 +141,11 @@ def parse_label(chunk):
 
 # https://tools.ietf.org/html/rfc1035
 # "4.1.2. Question section format"
-def parse_question_section(section):
+def parse_question_section(section, whole_response):
 	print "Parsing question section"
 
 	print "Calling parse_label from parse_question_section"
-	bytes_read, domain_name = parse_label(section)
+	bytes_read, domain_name = parse_label(section, whole_response)
 	qtype, qclass = struct.unpack('!HH', section[bytes_read:bytes_read+4])
 
 	print "Received answer for", domain_name
@@ -166,8 +170,8 @@ def parse_answer_section(section, whole_response):
 		pointer = first_16_bits & 0b0011111111111111
 		pointed = whole_response[pointer:]
 		print "Calling parse_label from parse_answer_section (if)"
-		pointed_label_length, pointed_label = parse_label(pointed)
-		print 'Answer section contained pointer to label "' + pointed_label + '"'
+		pointed_label_length, pointed_label = parse_label(pointed, whole_response)
+		print 'Answer section contained pointer to label "%s"' % pointed_label
 		name_length = 2
 	else:
 		print "Not a pointer... not implemented"
@@ -200,6 +204,7 @@ def parse_answer_section(section, whole_response):
 		print "\n"
 		return total_length, QTYPES[qtype], pointed_label, ip_address, None
 	elif QTYPES[qtype] == "SOA":
+		# "Start of Authority", I guess this can actually happen in cases where the domain does actually exist as well...
 		print "Ignoring SOA qtype, this happens when domains don't exist" # happens for example for mew-s.jp
 		return False
 		# exit()
@@ -207,11 +212,11 @@ def parse_answer_section(section, whole_response):
 		# For a CNAME, RDATA would be the result?
 		rdata = section[name_length + 2 + 2 + 4 + 2:name_length + 2 + 2 + 4 + 2 + rdlength]
 		print "Calling parse_label from parse_answer_section (type CNAME rdata)"
-		parsed_rdata = parse_label(rdata)[1]
+		parsed_rdata = parse_label(rdata, whole_response)[1]
 
 		return total_length, QTYPES[qtype], pointed_label, None, parsed_rdata
 
-		print pointed_label, "-->", parse_label(rdata)[1]
+		print pointed_label, "-->", parse_label(rdata, whole_response)[1]
 		print "Oh, it's a CNAME, probably pointing to another field in the answer section. Not implemented yet!"
 		exit()
 	else:
@@ -236,7 +241,7 @@ def parse_response(response):
 	# Question section is variable size, so can't actually cut out just that without looking at it,
 	# so pass the whole rest of the response to question section parser.
 	question_section = response[header_length:]
-	question_section_length, domain = parse_question_section(question_section)
+	question_section_length, domain = parse_question_section(question_section, response)
 	print "Question section was", question_section_length, "bytes"
 
 	if out['RCODE'] == RCODE_NAME_ERROR:

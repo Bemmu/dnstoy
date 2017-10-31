@@ -281,18 +281,36 @@ def parse_response(response):
 		print
 		print
 
-	# If there was a CNAME for the desired label, check if we got the IP address for that CNAME.
-	if domain in labels_to_cnames:
-		cname = labels_to_cnames[domain]
-		print "Domain %s had CNAME %s" % (domain, cname)
-		ip_address = labels_to_ip_addresses[cname]
-		print "The domain that CNAME pointed to had ip address %s" % ip_address
+	# Follow all CNAME pointers. Sometimes they are chained, for example:
+	#
+	# 	;; QUESTION SECTION:
+	# 	;gmw.cn.				IN	A
+	#
+	# 	;; ANSWER SECTION:
+	# 	gmw.cn.			600	IN	CNAME	www.gmw.cn.
+	# 	www.gmw.cn.		600	IN	CNAME	www.gmw.cn.cdn20.com.
+	# 	www.gmw.cn.cdn20.com.	600	IN	CNAME	guangmingwang.xdwscache.ourwebpic.com.
+	# 	guangmingwang.xdwscache.ourwebpic.com. 60 IN A	203.130.55.109
+	fqdn = domain
+	follows = 0
+	while fqdn in labels_to_cnames:
+		cname = labels_to_cnames[fqdn]
+		print "Domain %s had CNAME %s" % (fqdn, cname)
+		fqdn = cname
+		follows += 1
+		if follows > 100:
+			print "CNAME redirect loop! Panic."
+			pprint.pprint(labels_to_cnames)
+			exit()
 
-	# if answer_section_count > 1:
-	# 	print "Debug end, fixme"
-	# 	exit()
+	# Now hopefully I've arrived at a CNAME for which I know the A record (IP address)
+	if fqdn not in labels_to_ip_addresses:
+		pprint.pprint(labels_to_ip_addresses)
+		print "IP address for %s still unknown after following %d redirects! Panic." % (fqdn, follows)
+		exit()
+	else:
+		ip_address = labels_to_ip_addresses[fqdn]
 
-	# Now this is broken!
 	if not ip_address:
 		return False, domain, None
 	else:

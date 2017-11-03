@@ -10,14 +10,28 @@ import random
 import socket
 import sys
 import time
+import resource
+import os
+import subprocess
+
 DNS_PORT = 53
 RETRY_THRESHOLD = 10 # seconds
 
-base = libevent.Base()
+# Processes have a limit of how many files are allowed to be open. Opening a socket
+# bumps against this limit, crossing it means program gets aborted.
+def estimate_how_many_more_files_can_be_opened():
+	max_open_files = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
+	cmd = ['lsof', '-p', str(os.getpid())]
+	currently_open_files = len(subprocess.check_output(cmd).split("\n"))
+	return max_open_files - currently_open_files
 
-# Use top 1 million domains as test data
+base = libevent.Base()
+socket_count = 0
+max_socket_count = estimate_how_many_more_files_can_be_opened()
+
+# Use a selection of top 1 million domains as test data
 print "Reading domain list..."
-domain_list = [l.split(",")[1].strip()+"." for l in open('opendns-top-1m.csv')][0:100]
+domain_list = [l.split(",")[1].strip()+"." for l in open('opendns-top-1m.csv')][0:1000]
 print "Read domain list."
 
 public_dns_servers = [
@@ -78,6 +92,9 @@ events = [] # just for reference counting issue with libevent
 def send_nonblocking_packet(data, ip_address = '8.8.8.8'):
 	# global event # Somehow without a global reference, event won't work (issue with reference counting?)
 	s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+	global socket_count
+	socket_count += 1
+	print "%d sockets open" % socket_count	
 	s.setblocking(False)
 	event = libevent.Event(base, s.fileno(), libevent.EV_READ|libevent.EV_PERSIST, event_ready, s)
 	event.add(1)
@@ -192,6 +209,13 @@ def event_ready(event, fd, type_of_event, s):
 		started_domains.remove(domain + '.')
 
 		throttlers[server_ip].task_completed()
+
+		# So we don't cross max open files
+		# s.close()
+		# global socket_count
+		# socket_count -= 1
+		# print "%d sockets open" % socket_count	
+
 #		task_completed
 
 

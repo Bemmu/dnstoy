@@ -249,6 +249,10 @@ def parse_response(response):
 
 	answer_section_count = out['ANCOUNT'][0]
 
+	# This happens for at least googleusercontent.com
+	if answer_section_count == 0:
+		print "No ANSWERs; Domain %s has no IP address."
+		return False, domain, None
 
 	ip_address = None
 	answer_section_offset = 0

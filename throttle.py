@@ -20,12 +20,17 @@ class TaskThrottler():
 		# the current throughput.
 		self.timestamp_window = 10 # n
 
+		self.paused = False
+
 	# Attempt more tasks per second
 	def faster(self, factor = 1.1):
 		print "FASTER!"
 		self.throttle_per_second *= factor
 
 	def tick(self):
+		if self.paused:
+			return
+
 		sys.stdout.write(".")
 		sys.stdout.flush()
 

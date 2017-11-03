@@ -103,6 +103,10 @@ def send_nonblocking_packet(data, ip_address = '8.8.8.8'):
 	s.sendto(data, dest)
 
 def run_task(dns_server, task_completed_callback):
+	# Tell the calling throttler there is nothing to do for now if out of sockets.
+	if socket_count >= max_socket_count:
+		return False
+
 	try:		
 		next_domain_to_resolve = domain_list.pop()
 
@@ -155,11 +159,7 @@ def resolve_all():
 	throttlers = dict([(ip, TaskThrottler(run_task, ip)) for ip in public_dns_servers])
 	while not all_done():
 		for ip, throttler in throttlers.items():
-
-			# Don't try to send any more packets for now if used up all sockets.
-			# This probably messes up the throttling logic... should do this smarter.
-			if socket_count < max_socket_count:
-				throttler.tick()
+			throttler.tick()
 
 			#if throttler.current_throughput() > 
 			no_errors_recently = True
@@ -180,12 +180,17 @@ def resolve_all():
 	print
 	print "ALL DONE:"
 
+closed_sockets = set()
+
 def event_ready(event, fd, type_of_event, s):
 	# if type_of_event & libevent.EV_TIMEOUT:
 	# 	print "Timeout"
 	# 	exit()
 
 	if type_of_event & libevent.EV_READ:
+		if s in closed_sockets:
+			print "Trying to read from closed socket!"
+			exit()
 		response, addr = s.recvfrom(1024)
 		server_ip = addr[0]
 		print "Received DNS packet from %s!" % server_ip
@@ -215,6 +220,7 @@ def event_ready(event, fd, type_of_event, s):
 
 		# Need to close to avoid hitting max open files limit.
 		s.close()
+		closed_sockets.add(s)
 		global socket_count
 		socket_count -= 1
 		print "%d / %d sockets open" % (socket_count, max_socket_count)

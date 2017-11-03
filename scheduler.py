@@ -94,7 +94,7 @@ def send_nonblocking_packet(data, ip_address = '8.8.8.8'):
 	s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 	global socket_count
 	socket_count += 1
-	print "%d sockets open" % socket_count	
+	print "%d / %d sockets open" % (socket_count, max_socket_count)
 	s.setblocking(False)
 	event = libevent.Event(base, s.fileno(), libevent.EV_READ|libevent.EV_PERSIST, event_ready, s)
 	event.add(1)
@@ -155,8 +155,11 @@ def resolve_all():
 	throttlers = dict([(ip, TaskThrottler(run_task, ip)) for ip in public_dns_servers])
 	while not all_done():
 		for ip, throttler in throttlers.items():
-			# print ip, "tick"
-			throttler.tick()
+
+			# Don't try to send any more packets for now if used up all sockets.
+			# This probably messes up the throttling logic... should do this smarter.
+			if socket_count < max_socket_count:
+				throttler.tick()
 
 			#if throttler.current_throughput() > 
 			no_errors_recently = True
@@ -210,14 +213,14 @@ def event_ready(event, fd, type_of_event, s):
 
 		throttlers[server_ip].task_completed()
 
-		# So we don't cross max open files
-		# s.close()
-		# global socket_count
-		# socket_count -= 1
-		# print "%d sockets open" % socket_count	
+		# Need to close to avoid hitting max open files limit.
+		s.close()
+		global socket_count
+		socket_count -= 1
+		print "%d / %d sockets open" % (socket_count, max_socket_count)
 
-#		task_completed
-
+		# Not doing this makes base.loop throw socket.error: [Errno 9] Bad file descriptor
+		event.base.loopbreak()
 
 resolve_all()
 for domain, state in domain_state.items():
@@ -225,5 +228,3 @@ for domain, state in domain_state.items():
 		print "%s\t%s" % (domain, state['ip'])
 	if state['status'] == 'DIDNOTEXIST':
 		print "%s\t%s" % (domain, '-')
-
-

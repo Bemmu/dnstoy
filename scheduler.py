@@ -26,12 +26,11 @@ def estimate_how_many_more_files_can_be_opened():
 	return max_open_files - currently_open_files
 
 base = libevent.Base()
-socket_count = 0
 max_socket_count = estimate_how_many_more_files_can_be_opened()
 
 # Use a selection of top 1 million domains as test data
 print "Reading domain list..."
-domain_list = [l.split(",")[1].strip()+"." for l in open('opendns-top-1m.csv')][0:1000]
+domain_list = [l.split(",")[1].strip()+"." for l in open('opendns-top-1m.csv')][0:50]
 print "Read domain list."
 
 public_dns_servers = [
@@ -89,24 +88,32 @@ def domain_resolved(data):
 
 events = [] # just for reference counting issue with libevent
 
+# One socket for each name server.
+sockets = {}
+
 def send_nonblocking_packet(data, ip_address = '8.8.8.8'):
-	# global event # Somehow without a global reference, event won't work (issue with reference counting?)
-	s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-	global socket_count
-	socket_count += 1
-	print "%d / %d sockets open" % (socket_count, max_socket_count)
-	s.setblocking(False)
-	event = libevent.Event(base, s.fileno(), libevent.EV_READ|libevent.EV_PERSIST, event_ready, s)
-	event.add(1)
-	events.append(event)
+
+	try:
+		s = sockets[ip_address]
+		print "Reusing socket"
+	except KeyError:
+		print "Opening new socket"
+		s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+		print "%d / %d sockets open" % (len(sockets), max_socket_count)
+		s.setblocking(False)
+		event = libevent.Event(base, s.fileno(), libevent.EV_READ|libevent.EV_PERSIST, event_ready, s)
+		event.add(1)
+
+		# Without this the event is garbage collected (issue with reference counting?)
+		events.append(event)
+
+		sockets[ip_address] = s
+
 	dest = (ip_address, DNS_PORT)
 	s.sendto(data, dest)
+	print "Sent packet to %s" % dest[0]
 
 def run_task(dns_server, task_completed_callback):
-	# Tell the calling throttler there is nothing to do for now if out of sockets.
-	if socket_count >= max_socket_count:
-		return False
-
 	try:		
 		next_domain_to_resolve = domain_list.pop()
 
@@ -217,16 +224,6 @@ def event_ready(event, fd, type_of_event, s):
 		started_domains.remove(domain + '.')
 
 		throttlers[server_ip].task_completed()
-
-		# Need to close to avoid hitting max open files limit.
-		s.close()
-		closed_sockets.add(s)
-		global socket_count
-		socket_count -= 1
-		print "%d / %d sockets open" % (socket_count, max_socket_count)
-
-		# Not doing this makes base.loop throw socket.error: [Errno 9] Bad file descriptor
-		event.base.loopbreak()
 
 resolve_all()
 for domain, state in domain_state.items():

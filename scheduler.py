@@ -13,9 +13,10 @@ import time
 import resource
 import os
 import subprocess
+import collections 
 
 DNS_PORT = 53
-RETRY_THRESHOLD = 10 # seconds
+RETRY_THRESHOLD = 5 # seconds
 
 # Processes have a limit of how many files are allowed to be open. Opening a socket
 # bumps against this limit, crossing it means program gets aborted.
@@ -30,17 +31,40 @@ max_socket_count = estimate_how_many_more_files_can_be_opened()
 
 # Use a selection of top 1 million domains as test data
 print "Reading domain list..."
-domain_list = [l.split(",")[1].strip()+"." for l in open('opendns-top-1m.csv')][0:50]
+domain_list = [l.split(",")[1].strip()+"." for l in open('opendns-top-1m.csv')][0:5]
+domain_list.append("rutracker.org.")
+# print domain_list
+# domain_list = ["rutracker.org"]
 print "Read domain list."
 
 public_dns_servers = [
+	"109.69.8.51",
 	"8.8.8.8",
-	# "1.2.3.4"
+	"84.200.69.80",
+	"208.67.222.222",
+	"209.244.0.3",
+	"64.6.64.6",
+	"8.26.56.26",
+	"199.85.126.10",
+	"81.218.119.11",
+	"195.46.39.39",
+	"23.94.60.240",
+	"208.76.50.50",
+	"216.146.35.35",
+	"37.235.1.174",
+	"198.101.242.72",
+	"77.88.8.8",
+	"91.239.100.100",
+	"74.82.42.42",
+	"109.69.8.51"
 ]
+
+# Keep track of which servers have trouble giving responses
+dns_server_timeout_count = collections.defaultdict(int)
 
 domain_state = {
 	# "www.google.com" : {
-	# 	"ip" : "216.58.211.110",
+	# 	"resolved_ip" : "216.58.211.110",
 	# 	"status" : "DONE", # "DIDNOTEXIST" / "DONE" / "STARTED"
 	# 	"started" : "123456789" # some timestamp
 	# }
@@ -56,7 +80,7 @@ throttlers = None
 def set_all_domains_to_initial_state():
 	for domain in domain_list:
 		domain_state[domain] = {
-			"ip" : None,
+			"resolved_ip" : None,
 			"status" : None,
 			"started" : None
 		}
@@ -66,25 +90,27 @@ def make_stalled_domains_get_retried_later():
 	for domain in started_domains:
 		# If took too long, reset to initial state, which will 
 		# make this domain get retried at a later point.
-		elapsed = time.time() - domain_state[domain]['started']
-		if elapsed > RETRY_THRESHOLD:
-			domain_state[domain] = {
-				"ip" : None,
-				"status" : None,
-				"started" : None
-			}
-			domain_list.append(domain)
+		try:
+			elapsed = time.time() - domain_state[domain]['started']
+			if elapsed > RETRY_THRESHOLD:
 
-def domain_resolved(data):
-	domain = data['domain']
-	print "domain_resolved %s" % domain
-	domain_state[domain].update({
-		"status" : "DONE",
-		"ip" : "255.255.255.255"
-	})
-	pprint(domain_state[domain])
-	time.sleep(1)
-	data['callback']()
+				# Keep track of how many times each server timed out
+				server_ip = domain_state[domain]['server_ip']
+				dns_server_timeout_count[server_ip] += 1
+
+				# This domain can be tried again by other servers
+				domain_state[domain] = {
+					"resolved_ip" : None,
+					"status" : None,
+					"started" : None
+				}
+				domain_list.append(domain)
+
+				# So that we don't check this again right away
+				started_domains.remove(domain)
+		except Exception, e:
+			print str(e)
+			import code; code.interact(local=locals() + globals())
 
 events = [] # just for reference counting issue with libevent
 
@@ -99,6 +125,7 @@ def send_nonblocking_packet(data, ip_address = '8.8.8.8'):
 	except KeyError:
 		print "Opening new socket"
 		s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+		sockets[ip_address] = s
 		print "%d / %d sockets open" % (len(sockets), max_socket_count)
 		s.setblocking(False)
 		event = libevent.Event(base, s.fileno(), libevent.EV_READ|libevent.EV_PERSIST, event_ready, s)
@@ -106,8 +133,6 @@ def send_nonblocking_packet(data, ip_address = '8.8.8.8'):
 
 		# Without this the event is garbage collected (issue with reference counting?)
 		events.append(event)
-
-		sockets[ip_address] = s
 
 	dest = (ip_address, DNS_PORT)
 	s.sendto(data, dest)
@@ -122,6 +147,7 @@ def run_task(dns_server, task_completed_callback):
 
 		# Update domain state so that later if resolution fails we'll know to retry
 		domain_state[next_domain_to_resolve].update({
+			"server_ip" : dns_server,
 			"status" : "STARTED",
 			"started" : time.time()
 		})
@@ -150,7 +176,7 @@ def print_progress():
 	print "%.5f%% of domains checked" % percentage
 
 def print_throughput(throttlers):
-	"""Print how fast each domain name server is"""
+	"""Print how fast each name server is"""
 
 	print
 	print
@@ -169,9 +195,9 @@ def resolve_all():
 			throttler.tick()
 
 			#if throttler.current_throughput() > 
-			no_errors_recently = True
-			if no_errors_recently:
-				throttler.faster() # Things seem to be going well, try using this server more
+			# no_errors_recently = True
+			# if no_errors_recently:
+			# 	throttler.faster() # Things seem to be going well, try using this server more
 
 		time.sleep(0.1)
 
@@ -204,9 +230,8 @@ def event_ready(event, fd, type_of_event, s):
 
 		# import code
 		# code.InteractiveConsole(locals=locals()).interact()
-
-		response_hexed = " ".join(hex(ord(c)) for c in response)
-		print "Parsing response"
+		# response_hexed = " ".join(hex(ord(c)) for c in response)
+		print "Parsing response from %s" % server_ip
 		did_domain_exist, domain, ip_address = dns.parse_response(response)
 		print "Domain did %sexist." % "not " if not did_domain_exist else ""
 		print "Domain in question was %s." % domain
@@ -214,7 +239,7 @@ def event_ready(event, fd, type_of_event, s):
 		state = domain_state[domain + '.']
 		if did_domain_exist:
 			state.update({
-				'ip' : ip_address,
+				'resolved_ip' : ip_address,
 				'status' : 'DONE'
 			})
 		else:
@@ -228,6 +253,11 @@ def event_ready(event, fd, type_of_event, s):
 resolve_all()
 for domain, state in domain_state.items():
 	if state['status'] == 'DONE':
-		print "%s\t%s" % (domain, state['ip'])
+		print "%s\t%s" % (domain, state['resolved_ip'])
 	if state['status'] == 'DIDNOTEXIST':
 		print "%s\t%s" % (domain, '-')
+
+print
+print
+print "STALL STATS:"
+pprint(dns_server_timeout_count)

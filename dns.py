@@ -164,6 +164,8 @@ def parse_answer_section(section, whole_response):
 
 	# Starts off with NAME like 0xc00c (two bytes)
 
+	foo = parse_label(section, whole_response)
+
 	first_16_bits = struct.unpack('!H', section[0:2])[0]
 	is_pointer = (first_16_bits & 0b1100000000000000) != 0
 	if is_pointer:
@@ -173,6 +175,9 @@ def parse_answer_section(section, whole_response):
 		pointed_label_length, pointed_label = parse_label(pointed, whole_response)
 		print 'Answer section contained pointer to label "%s"' % pointed_label
 		name_length = 2
+
+		print "Got label %s vs %s" % (foo[1], pointed_label)
+		exit()
 	else:
 		print "Not a pointer... not implemented"
 		exit()

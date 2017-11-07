@@ -31,7 +31,7 @@ max_socket_count = estimate_how_many_more_files_can_be_opened()
 
 # Use a selection of top 1 million domains as test data
 print "Reading domain list..."
-domain_list = [l.split(",")[1].strip()+"." for l in open('opendns-top-1m.csv')][0:5]
+domain_list = [l.split(",")[1].strip()+"." for l in open('opendns-top-1m.csv')][0:500]
 domain_list.append("rutracker.org.")
 # print domain_list
 # domain_list = ["rutracker.org"]

@@ -178,8 +178,8 @@ def parse_answer_section(section, whole_response):
 
 	# Starts off with NAME like 0xc00c (two bytes)
 
-	name_length, pointed_label = parse_label(section, whole_response)
-	print "Parse_label returned %s, %s" % (name_length, pointed_label)
+	name_length, label = parse_label(section, whole_response)
+	print "Parse_label returned %s, %s" % (name_length, label)
 
 	# Then comes the TYPE represented as two bytes which is the requested type (A, MX etc.)
 	# And again "Internet" as 0x00 0x01
@@ -204,9 +204,9 @@ def parse_answer_section(section, whole_response):
 		lip = struct.unpack('!BBBB', section[name_length + 2 + 2 + 4 + 2:name_length + 2 + 2 + 4 + 2 + 4])
 		ip_address = ".".join([str(b) for b in lip])
 		print "\n"
-		print "\t\t", pointed_label, "has IP address", ip_address
+		print "\t\t", label, "has IP address", ip_address
 		print "\n"
-		return total_length, QTYPES[qtype], pointed_label, ip_address, None
+		return total_length, QTYPES[qtype], label, ip_address, None
 	elif QTYPES[qtype] == "SOA":
 		# "Start of Authority", I guess this can actually happen in cases where the domain does actually exist as well...
 		print "Ignoring SOA qtype, this happens when domains don't exist" # happens for example for mew-s.jp
@@ -218,9 +218,9 @@ def parse_answer_section(section, whole_response):
 		print "Calling parse_label from parse_answer_section (type CNAME rdata)"
 		parsed_rdata = parse_label(rdata, whole_response)[1]
 
-		return total_length, QTYPES[qtype], pointed_label, None, parsed_rdata
+		return total_length, QTYPES[qtype], label, None, parsed_rdata
 
-		print pointed_label, "-->", parse_label(rdata, whole_response)[1]
+		print label, "-->", parse_label(rdata, whole_response)[1]
 		print "Oh, it's a CNAME, probably pointing to another field in the answer section. Not implemented yet!"
 		exit()
 	else:
@@ -275,6 +275,10 @@ def parse_response(response):
 		# Answer section may contain pointers to earlier parts because of compression, 
 		# which is why entire response needs to be passed in.
 		answer_section_length, qtype, label, ip_address, rdata = parse_answer_section(answer_section, response)
+
+		# Sometimes case of labels differs from the question. 
+		# For example the DNS response for hola.com actually returns holA.com.
+		label = label.lower()
 
 		if qtype == 'CNAME':
 			labels_to_cnames[label] = rdata

@@ -7,7 +7,7 @@ class TaskThrottler():
 		self.run_task_callback = run_task_callback
 		self.data_to_pass_to_callback = data_to_pass_to_callback
 
-		self.throttle_per_second = 5
+		self.throttle_per_second = 50
 		self.prev_task_timestamp = time.time() - 1 / float(self.throttle_per_second)
 
 		self.currently_running_task_count = 0

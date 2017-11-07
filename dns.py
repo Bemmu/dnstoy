@@ -8,6 +8,7 @@ import random
 import struct
 import pprint
 
+RCODE_SERVER_FAILURE = 2
 RCODE_NAME_ERROR = 3
 RCODES = {
 	0: "No error condition.",
@@ -227,6 +228,9 @@ def parse_answer_section(section, whole_response):
 		print "Answer section parsing for this qtype %s not implemented" % QTYPES[qtype]
 		exit()
 
+# This usually means the server was queried too fast.
+class ServerFailureException(Exception):
+    pass
 
 # Returns True if domain existed, False if not
 def parse_response(response):
@@ -247,6 +251,9 @@ def parse_response(response):
 	question_section = response[header_length:]
 	question_section_length, domain = parse_question_section(question_section, response)
 	print "Question section was", question_section_length, "bytes"
+
+	if out['RCODE'] == RCODE_SERVER_FAILURE:
+		raise ServerFailureException
 
 	if out['RCODE'] == RCODE_NAME_ERROR:
 		return False, domain, None

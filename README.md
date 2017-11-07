@@ -52,4 +52,4 @@ List of some things I wanted to know through writing this, and what I've found o
 ## What I want to learn next
 
 **Q: What happens if you query a name server too fast?**
-*A: ??? It stops responding at least. Not sure if it complains first somehow, need to look at responses more carefully.*
+*A: At least one server (8.26.56.26) gave a response with RCODE 2 when I increased the rate a lot. Google's 8.8.8.8 seemed to stop responding at least, not sure if it first somehow complained, need to go back to look at the responses more carefully.***

@@ -46,6 +46,9 @@ List of some things I wanted to know through writing this, and what I've found o
 **Q: Do any name servers actually send out responses with no ANSWER sections?**
 **A: Yes.**
 
+**Q: How about responses where the cAsE of the answer is different from the question?**
+**A: Yes, that happens too.**
+
 ## What I want to learn next
 
 **Q: What happens if you query a name server too fast?**

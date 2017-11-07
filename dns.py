@@ -101,6 +101,12 @@ def parse_header(header):
 	return out
 
 def parse_label(chunk, whole_response):
+	"""
+	Returns the size of the label in bytes, along with the label itself.
+	The size can differ from the length of the label if it used compression.
+	"""
+
+	print
 	print "Parsing chunk %s" % (["0x%x" % ord(ch) for ch in chunk])
 
 	# Length of string, followed by actual string bytes for each part of domain name ("label").
@@ -124,20 +130,28 @@ def parse_label(chunk, whole_response):
 		print "Chunk[i + 1] is %s" % bin(ord(chunk[i+1]))
 		if ord(chunk[i]) & 0b1100000:
 			pointer = ((0b00111111 & ord(chunk[i + 0])) << 8) | (ord(chunk[i + 1]))
-			pointed_parts = parse_label(whole_response[pointer:], whole_response)
-			print "Label contained pointer %d to %s?" % (pointer, pointed_parts[1])
+			_, pointed_label = parse_label(whole_response[pointer:], whole_response)
+			print "Label contained pointer %d to %s?" % (pointer, pointed_label)
 
 			# RFC 1035 says that if there is a pointer, then that ends the parts list, so can stop here.
-			return i, ".".join(parts) + "." + pointed_parts[1]
+			label = ".".join(parts + [pointed_label])
+			print "Returning '%s' from pointer call" % label
 
-			exit()
+			return i + 2, label
 		else:
 			part = chunk[i+1:i+1+part_length]
 		print "Part is *%s*" % part
 		parts.append(part)
 		i += part_length + 1
-	i += 1
-	return i, ".".join(parts)
+
+	# i is currently a 0-based pointer, convert to 1-based size
+	i += 1 
+
+	print "%d parts" % len(parts)
+
+	label = ".".join(parts)
+	print "Returning '%s'" % label
+	return i, label
 
 # https://tools.ietf.org/html/rfc1035
 # "4.1.2. Question section format"
@@ -164,23 +178,8 @@ def parse_answer_section(section, whole_response):
 
 	# Starts off with NAME like 0xc00c (two bytes)
 
-	foo = parse_label(section, whole_response)
-
-	first_16_bits = struct.unpack('!H', section[0:2])[0]
-	is_pointer = (first_16_bits & 0b1100000000000000) != 0
-	if is_pointer:
-		pointer = first_16_bits & 0b0011111111111111
-		pointed = whole_response[pointer:]
-		print "Calling parse_label from parse_answer_section (if)"
-		pointed_label_length, pointed_label = parse_label(pointed, whole_response)
-		print 'Answer section contained pointer to label "%s"' % pointed_label
-		name_length = 2
-
-		print "Got label %s vs %s" % (foo[1], pointed_label)
-		exit()
-	else:
-		print "Not a pointer... not implemented"
-		exit()
+	name_length, pointed_label = parse_label(section, whole_response)
+	print "Parse_label returned %s, %s" % (name_length, pointed_label)
 
 	# Then comes the TYPE represented as two bytes which is the requested type (A, MX etc.)
 	# And again "Internet" as 0x00 0x01

@@ -31,27 +31,22 @@ max_socket_count = estimate_how_many_more_files_can_be_opened()
 
 # Use a selection of top 1 million domains as test data
 print "Reading domain list..."
-domain_list = [l.split(",")[1].strip()+"." for l in open('opendns-top-1m.csv')][0:500]
+domain_list = [l.split(",")[1].strip()+"." for l in open('opendns-top-1m.csv')][0:1000]
 domain_list.append("rutracker.org.")
 # print domain_list
 # domain_list = ["rutracker.org"]
 print "Read domain list."
 
 public_dns_servers = [
-	"109.69.8.51",
 	"8.8.8.8",
 	"84.200.69.80",
 	"208.67.222.222",
 	"209.244.0.3",
 	"64.6.64.6",
 	"8.26.56.26",
-	"199.85.126.10",
-	"81.218.119.11",
 	"195.46.39.39",
 	"23.94.60.240",
-	"208.76.50.50",
 	"216.146.35.35",
-	"37.235.1.174",
 	"198.101.242.72",
 	"77.88.8.8",
 	"91.239.100.100",
@@ -237,16 +232,20 @@ def event_ready(event, fd, type_of_event, s):
 		print "Domain in question was %s." % domain
 
 		state = domain_state[domain + '.']
-		if did_domain_exist:
-			state.update({
-				'resolved_ip' : ip_address,
-				'status' : 'DONE'
-			})
-		else:
-			state.update({
-				'status' : 'DIDNOTEXIST'
-			})
-		started_domains.remove(domain + '.')
+
+		# State could be something else in case getting a delayed response for a request
+		# that got already assigned to another name server.
+		if state['status'] == 'STARTED':
+			if did_domain_exist:
+				state.update({
+					'resolved_ip' : ip_address,
+					'status' : 'DONE'
+				})
+			else:
+				state.update({
+					'status' : 'DIDNOTEXIST'
+				})
+			started_domains.remove(domain + '.')
 
 		throttlers[server_ip].task_completed()
 

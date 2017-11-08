@@ -228,11 +228,8 @@ def parse_answer_section(section, whole_response):
 		print "Answer section parsing for this qtype %s not implemented" % QTYPES[qtype]
 		exit()
 
-# This usually means the server was queried too fast.
-class ServerFailureException(Exception):
-    pass
-
-# Returns True if domain existed, False if not
+# Returns True if domain existed, False if not. Also returns the domain name queried
+# and its resolved ip address, and response RCODE.
 def parse_response(response):
 	print "Response length is %d bytes" % len(response)
 
@@ -253,17 +250,17 @@ def parse_response(response):
 	print "Question section was", question_section_length, "bytes"
 
 	if out['RCODE'] == RCODE_SERVER_FAILURE:
-		raise ServerFailureException
+		return False, domain, None, out['RCODE']
 
 	if out['RCODE'] == RCODE_NAME_ERROR:
-		return False, domain, None
+		return False, domain, None, out['RCODE']
 
 	answer_section_count = out['ANCOUNT'][0]
 
 	# This happens for at least googleusercontent.com
 	if answer_section_count == 0:
 		print "No ANSWERs; Domain %s has no IP address."
-		return False, domain, None
+		return False, domain, None, out['RCODE']
 
 	ip_address = None
 	answer_section_offset = 0
@@ -331,7 +328,7 @@ def parse_response(response):
 		ip_address = labels_to_ip_addresses[fqdn]
 
 	if not ip_address:
-		return False, domain, None
+		return False, domain, None, out['RCODE']
 	else:
-		return True, domain, ip_address
+		return True, domain, ip_address, out['RCODE']
 

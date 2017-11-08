@@ -227,11 +227,26 @@ def event_ready(event, fd, type_of_event, s):
 		# code.InteractiveConsole(locals=locals()).interact()
 		# response_hexed = " ".join(hex(ord(c)) for c in response)
 		print "Parsing response from %s" % server_ip
-		did_domain_exist, domain, ip_address = dns.parse_response(response)
-		print "Domain did %sexist." % "not " if not did_domain_exist else ""
-		print "Domain in question was %s." % domain
-
+		did_domain_exist, domain, ip_address, rcode = dns.parse_response(response)
 		state = domain_state[domain + '.']
+
+		if rcode == dns.RCODE_SERVER_FAILURE:
+			# Maybe querying too fast
+			print "DNS server failure for %s" % server_ip
+			throttlers[server_ip].throttle_per_second *= 0.5
+
+			# Try again later
+			if state['status'] == 'STARTED':
+				started_domains.remove(domain + '.')
+				state = {
+					"resolved_ip" : None,
+					"status" : None,
+					"started" : None
+				}
+				return
+
+		print "Domain in question was %s." % domain
+		print "Domain did %sexist." % "not " if not did_domain_exist else ""
 
 		# State could be something else in case getting a delayed response for a request
 		# that got already assigned to another name server.

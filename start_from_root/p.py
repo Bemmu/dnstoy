@@ -1,15 +1,54 @@
+import types
+import code
+from task import Task
 import dns.message
 import dns.rdatatype
 
 message = dns.message.make_query("google.com.", "A")
 data = message.to_wire()
 
-
-
 questions = [
-	('192.5.6.30', 'google.com.')
+	# Task('google.com')
 ]
 
+def dummy_questions():
+	print "dummy_questions"
+	global questions
+	for i in range(10**2):
+		questions.append(Task('google.com'))
+
+def send_next_query():
+	print "send_next_query"
+	pass
+	# questions.
+
+def foo():
+	print "foo"
+
+# Decorate functions so they display what is being called
+functions = [(k, v) for k, v in globals().items() if type(v) == types.FunctionType]
+for function_name, function in functions:
+	def make_function(function_name, function):
+		def f(*args, **kwargs):
+			print "%s" % function_name
+			function(*args, **kwargs)
+		return f
+		# print "Setting %s to %s" % (function_name, f)
+	globals()[function_name] = make_function(function_name, function)
+
+dummy_questions()
+send_next_query()
+foo()
+
+# globals["send_next_query"] = foo
+
+# code.interact(local=locals())
+
+exit()
+
+questions = [
+	('google.com.', '192.5.6.30')
+]
 
 
 ('216.239.34.10', 'google.com.')

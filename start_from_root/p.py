@@ -1,8 +1,13 @@
-import types
 import code
-from task import Task
+from task import DomainResolutionTask
+from decorate import decorate_global_functions_with_printouts 
 import dns.message
 import dns.rdatatype
+import libevent
+DNS_PORT = 53
+
+base = libevent.Base()
+
 
 message = dns.message.make_query("google.com.", "A")
 data = message.to_wire()
@@ -11,34 +16,24 @@ questions = [
 	# Task('google.com')
 ]
 
+def got_response():
+	pass
+
 def dummy_questions():
-	print "dummy_questions"
 	global questions
-	for i in range(10**2):
-		questions.append(Task('google.com'))
+	for i in range(10**6):
+		questions.append(DomainResolutionTask('google.com'))
 
 def send_next_query():
-	print "send_next_query"
-	pass
+	for i in questions:
+		pass
 	# questions.
 
-def foo():
-	print "foo"
-
-# Decorate functions so they display what is being called
-functions = [(k, v) for k, v in globals().items() if type(v) == types.FunctionType]
-for function_name, function in functions:
-	def make_function(function_name, function):
-		def f(*args, **kwargs):
-			print "%s" % function_name
-			function(*args, **kwargs)
-		return f
-		# print "Setting %s to %s" % (function_name, f)
-	globals()[function_name] = make_function(function_name, function)
-
+decorate_global_functions_with_printouts(globals())
 dummy_questions()
-send_next_query()
-foo()
+for i in range(10**6):
+	send_next_query()
+	print i
 
 # globals["send_next_query"] = foo
 
@@ -57,7 +52,7 @@ import socket
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 # destination = ('192.5.6.30', 53)
 # destination = ('198.41.0.4', 53)
-destination = ('216.239.32.10', 53)
+destination = ('216.239.32.10', DNS_PORT)
 
 s.sendto(data, destination)
 

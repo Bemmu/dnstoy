@@ -26,11 +26,14 @@ class DomainResolutionTask():
 #		> Hash where key is domain
 
 # This would be used in the end to look at the results.
-domains_for_which_response_received
+# domains_for_which_response_received = {
+# 	'google.com' : '1.2.3.4' 
+# } # might as well store as dict since will probably want to access it that way, makes setting easy too
 
 # This should be ordered such that it's fast to find expired ones
 # Priority queue?
-domains_queried 
+# domains_queried_latest_last = [('google.com', 5), ('example.com', 100)...]
+
 # Ways to store the time:
 # 	- query time
 #	- expiration time
@@ -41,10 +44,10 @@ domains_queried
 # Then always look at the first item on the list. If that has expired, then do it again.
 
 # Ordering of this doesn't matter
-domains_that_need_querying = [
-	(domain, where to ask),
-	(domain, where to ask), ...
-]
+# domains_that_need_querying = [
+# 	(domain, where to ask),
+# 	(domain, where to ask), ...
+# ]
 
 # load list initially here
 

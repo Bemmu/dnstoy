@@ -1,4 +1,22 @@
-closed_sockets = set()
+import dns
+import dns.message
+import socket
+from event_loop import add_event
+
+# Since this is UDP, just one socket to represent our endpoint is enough.
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.setblocking(False)
+
+def send_async_dns_query(domain, where_to_ask):
+	data = dns.message.make_query(domain, 'A').to_wire()
+	send_nonblocking_packet(data, where_to_ask)
+	add_event()
+	dest = (ip_address, DNS_PORT)
+	s.sendto(data, dest)
+	print "Sent packet to %s" % dest[0]
+
+def root_servers():
+	return [socket.gethostbyname('%s.root-servers.net' % ch) for ch in 'abcdefghijkl']	
 
 def got_packet(socket):
 	if s in closed_sockets:
@@ -9,23 +27,3 @@ def got_packet(socket):
 	server_ip = addr[0]
 	print "Received packet from %s!" % server_ip
 
-def send_nonblocking_packet(data, ip_address = '8.8.8.8'):
-
-	try:
-		s = sockets[ip_address]
-		print "Reusing socket"
-	except KeyError:
-		print "Opening new socket"
-		s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-		sockets[ip_address] = s
-		print "%d / %d sockets open" % (len(sockets), max_socket_count)
-		s.setblocking(False)
-		event = libevent.Event(base, s.fileno(), libevent.EV_READ|libevent.EV_PERSIST, event_ready, s)
-		event.add(1)
-
-		# Without this the event is garbage collected (issue with reference counting?)
-		events.append(event)
-
-	dest = (ip_address, DNS_PORT)
-	s.sendto(data, dest)
-	print "Sent packet to %s" % dest[0]

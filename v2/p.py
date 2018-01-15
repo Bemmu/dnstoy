@@ -1,3 +1,5 @@
+# 21 seconds to resolve 50 domains at 50 parallel
+
 import random
 import time
 import socket
@@ -13,8 +15,8 @@ REASK_IN_SECONDS = 5
 
 # Initially ask about each domain from a random root server.
 root_servers = [socket.gethostbyname('%s.root-servers.net' % ch) for ch in 'abcdefghijkl']	
-domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:50]
-# domains = ['amazon.com']
+# domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:125]
+domains = ['detail.tmall.com']
 domains_that_need_querying = [(domain, random.choice(root_servers)) for domain in domains]
 
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -110,6 +112,10 @@ while True:
 			domains_being_queried_latest_last = [x for x in domains_being_queried_latest_last if x[0] != domain]
 
 			if response.answer:
+				if response.answer[0].rdtype != A_RECORD_RDTYPE:
+					print "Answer for %s was not A but %s" % (domain, response.answer[0].rdtype)
+					exit()
+
 				answer_name = str(response.answer[0].name)[:-1]
 				answer_ip = str(response.answer[0][0])
 				domains_for_which_response_received[answer_name] = answer_ip

@@ -1,4 +1,3 @@
-import code
 import random
 import time
 import socket
@@ -40,7 +39,13 @@ def is_ip_address(str):
 	return all([ch in "0123456789." for ch in str])
 
 while True:
-	print "Looping, %s queries ongoing (%s), %s to do (%s)" % (len(domains_being_queried_latest_last), [x[0] for x in domains_being_queried_latest_last], len(domains_that_need_querying), [x[0] for x in domains_that_need_querying])
+	ongoing_count = len(domains_being_queried_latest_last)
+	todo_count = len(domains_that_need_querying)
+	print "Looping, %s queries ongoing (%s), %s to do (%s)" % (ongoing_count, [x[0] for x in domains_being_queried_latest_last], todo_count, [x[0] for x in domains_that_need_querying])
+
+	if ongoing_count > 0 and todo_count == 0:
+		print "Sleeping a bit since just waiting for replies..."
+		time.sleep(0.05)
 
 	# sys.stdout.write(".")
 	sys.stdout.flush()
@@ -89,9 +94,6 @@ while True:
 					print "\t%s\t%s" % (domain, domains_for_which_response_received[domain])
 
 				exit()
-			else:
-				print "Nothing to do, just waiting for replies..."
-				time.sleep(1.0)
 	else:
 		pass
 		# print "Too many concurrent."
@@ -111,36 +113,36 @@ while True:
 				answer_ip = str(response.answer[0][0])
 				domains_for_which_response_received[answer_name] = answer_ip
 				print "The answer is %s: %s" % (answer_name, answer_ip)
-				# code.interact(local=locals())
 
 			elif response.authority: # Need to ask forward
 
 				# Looks like authority sections don't always give IP addresses for all authority servers.
 				# So now there is a dependency, need to resolve some name of server in auth section to continue.
 
+				# Authority section has the name servers to ask next.
 				authority_names = [str(auth) for auth in response.authority[0]]
 
+				# Additional section sometimes provides IP addresses for some of those servers for convenience.
 				for a in response.additional:
 					if a.rdtype == A_RECORD_RDTYPE:
 						print "Recording %s as %s" % (str(a.name)[:-1], str(a[0]))
 						domains_for_which_response_received[str(a.name)[:-1]] = str(a[0])
 
-				# authority_name = random.choice(authority_names)[:-1]
-				authority_name = sorted(authority_names)[-1][:-1]
+				# There might now be a number of name servers that could be asked next. To make things faster,
+				# prefer one for which IP address is already known.
+				known_ones = [auth[:-1] for auth in authority_names if auth[:-1] in domains_for_which_response_received]
+				if known_ones:
+					authority_name = random.choice(known_ones)
+					print "Picked random known authority: %s" % authority_name
+				else:
+					authority_name = random.choice(authority_names)[:-1]
+					print "Didn't know any of them, so picked random authority: %s" % authority_name
 
 				# If this IP was not in additional, then need to resolve it first.
-
 				print "Do we know %s?" % authority_name,
 				next_ask = domains_for_which_response_received.get(authority_name)
 				if not next_ask:
 					print "No."
-
-					# already_resolved_ip = domains_for_which_response_received.get(authority_name[:-1])
-					# if already_resolved_ip:
-					# 	print "Already resolved it."
-
-					# else:
-					# 	print "Not resolved yet."
 					domains_that_need_querying.insert(0, (authority_name, random.choice(root_servers)))
 					next_ask = authority_name
 				else:
@@ -155,5 +157,3 @@ while True:
 				break
 			else:
 				print "Some other error on socket"
-
-	time.sleep(0.1)

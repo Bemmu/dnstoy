@@ -10,10 +10,12 @@ NO_DATA_ERRNO = 35
 DNS_PORT = 53
 MAX_CONCURRENT = 1
 A_RECORD_RDTYPE = 1
+REASK_IN_SECONDS = 5
 
 # Initially ask about each domain from a random root server.
 root_servers = [socket.gethostbyname('%s.root-servers.net' % ch) for ch in 'abcdefghijkl']	
-domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:10]
+# domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:10]
+domains = ['amazon.com']
 domains_that_need_querying = [(domain, random.choice(root_servers)) for domain in domains]
 
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -29,24 +31,63 @@ domains_being_queried_latest_last = [
 ]
 
 def send_async_dns_query(domain, name_server_ip_address):
-	print "Should ask about %s from %s" % (domain, name_server_ip_address)
 	data = dns.message.make_query(domain, 'A').to_wire()
 	dest = (name_server_ip_address, DNS_PORT)
 	s.sendto(data, dest)
+	print "Sent packet asking about %s to %s" % (domain, name_server_ip_address)
+
+def is_ip_address(str):
+	return all([ch in "0123456789." for ch in str])
 
 while True:
-	sys.stdout.write(".")
+	print "Looping, %s queries ongoing (%s), %s to do (%s)" % (len(domains_being_queried_latest_last), [x[0] for x in domains_being_queried_latest_last], len(domains_that_need_querying), [x[0] for x in domains_that_need_querying])
+
+	# sys.stdout.write(".")
 	sys.stdout.flush()
+
+	# Retry queries after some time
+	if domains_being_queried_latest_last:
+		while True:
+			domain, query_timestamp = domains_being_queried_latest_last[0]
+			oldest_elapsed = time.time() - query_timestamp
+			if oldest_elapsed > REASK_IN_SECONDS:
+				domains_being_queried_latest_last.pop(0)
+				domains_that_need_querying.insert(0, (domain, random.choice(root_servers)))
+				print "Answer for %s took too long, asking again starting from root." % domain
+			else:
+				print "Nothing expired (oldest %.2f seconds old)" % oldest_elapsed
+				break
 
 	if len(domains_being_queried_latest_last) < MAX_CONCURRENT:
 		try:
-			domain, name_server_ip_address = domains_that_need_querying.pop()
-			send_async_dns_query(domain, name_server_ip_address)
+			domain, next_ask = domains_that_need_querying.pop(0)
+			print "Doing %s next, need to ask %s" % (domain, next_ask)
+			if not is_ip_address(next_ask):
+				print "Not an ip address: %s" % next_ask
+
+				# Translate name to IP address if we know it already.
+				try:
+					ip = domains_for_which_response_received[next_ask]
+					print "Knew that %s is %s, asking there for %s later." % (next_ask, ip, domain)
+					next_ask = ip
+				except KeyError:
+					print "Didn't know the ip address for %s yet, try again later." % next_ask
+
+				domains_that_need_querying.append((domain, next_ask))
+				continue
+
+			send_async_dns_query(domain, next_ask)
 			domains_being_queried_latest_last.append((domain, time.time()))
 		except IndexError:
 			if len(domains_being_queried_latest_last) == 0:
-				print "All done!"
+				print
 				print domains_for_which_response_received
+				print
+				print "All done!"
+
+				for domain in domains:
+					print "\t%s\t%s" % (domain, domains_for_which_response_received[domain])
+
 				exit()
 			else:
 				print "Nothing to do, just waiting for replies..."
@@ -55,18 +96,18 @@ while True:
 		pass
 		# print "Too many concurrent."
 
-	# Should allow for multiple recvs per tick
-
+	# Loop until nothing more to read from socket.
 	while True:
 		try:
 			data, addr = s.recvfrom(1024)
+			print "Received packet from %s" % addr[0]
 			response = dns.message.from_wire(data)
 			domain = str(response.question[0].name)[:-1]
 
 			domains_being_queried_latest_last = [x for x in domains_being_queried_latest_last if x[0] != domain]
 
 			if response.answer:
-				answer_name = str(response.answer[0].name)
+				answer_name = str(response.answer[0].name)[:-1]
 				answer_ip = str(response.answer[0][0])
 				domains_for_which_response_received[answer_name] = answer_ip
 				print "The answer is %s: %s" % (answer_name, answer_ip)
@@ -74,21 +115,40 @@ while True:
 
 			elif response.authority: # Need to ask forward
 
-				# Looks like authority sections don't always have additional sections with IP addresses listed...
-				# Need to plan what to do then. There can be a dependency now? Need to resolve some name before can
-				# continue resolving another...
+				# Looks like authority sections don't always give IP addresses for all authority servers.
+				# So now there is a dependency, need to resolve some name of server in auth section to continue.
 
 				authority_names = [str(auth) for auth in response.authority[0]]
 
-				additional_ips = {}
 				for a in response.additional:
 					if a.rdtype == A_RECORD_RDTYPE:
-						additional_ips[str(a.name)] = str(a[0])
+						print "Recording %s as %s" % (str(a.name)[:-1], str(a[0]))
+						domains_for_which_response_received[str(a.name)[:-1]] = str(a[0])
 
-				authority_name = random.choice(authority_names)
-				next_ip = additional_ips[authority_name]
-				print "Asking forward about %s to %s (%s)" % (domain, authority_name[:-1], next_ip)
-				domains_that_need_querying.append((domain, next_ip))
+				# authority_name = random.choice(authority_names)[:-1]
+				authority_name = sorted(authority_names)[-1][:-1]
+
+				# If this IP was not in additional, then need to resolve it first.
+
+				print "Do we know %s?" % authority_name,
+				next_ask = domains_for_which_response_received.get(authority_name)
+				if not next_ask:
+					print "No."
+
+					# already_resolved_ip = domains_for_which_response_received.get(authority_name[:-1])
+					# if already_resolved_ip:
+					# 	print "Already resolved it."
+
+					# else:
+					# 	print "Not resolved yet."
+					domains_that_need_querying.insert(0, (authority_name, random.choice(root_servers)))
+					next_ask = authority_name
+				else:
+					print "Yes."
+
+				print "Asking forward about %s to %s (%s)" % (domain, authority_name, next_ask)
+				domains_that_need_querying.append((domain, next_ask))
+				print domains_that_need_querying
 
 		except socket.error, e:
 			if e.errno == NO_DATA_ERRNO:

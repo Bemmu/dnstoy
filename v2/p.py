@@ -13,8 +13,8 @@ REASK_IN_SECONDS = 5
 
 # Initially ask about each domain from a random root server.
 root_servers = [socket.gethostbyname('%s.root-servers.net' % ch) for ch in 'abcdefghijkl']	
-# domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:10]
-domains = ['amazon.com']
+domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:50]
+# domains = ['amazon.com']
 domains_that_need_querying = [(domain, random.choice(root_servers)) for domain in domains]
 
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -59,6 +59,7 @@ while True:
 				domains_being_queried_latest_last.pop(0)
 				domains_that_need_querying.insert(0, (domain, random.choice(root_servers)))
 				print "Answer for %s took too long, asking again starting from root." % domain
+				break
 			else:
 				print "Nothing expired (oldest %.2f seconds old)" % oldest_elapsed
 				break

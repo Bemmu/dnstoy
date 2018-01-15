@@ -11,6 +11,7 @@ NO_DATA_ERRNO = 35
 DNS_PORT = 53
 MAX_CONCURRENT = 1
 A_RECORD_RDTYPE = 1
+CNAME_RECORD_RDTYPE = 5
 REASK_IN_SECONDS = 5
 
 # Initially ask about each domain from a random root server.
@@ -112,14 +113,31 @@ while True:
 			domains_being_queried_latest_last = [x for x in domains_being_queried_latest_last if x[0] != domain]
 
 			if response.answer:
-				if response.answer[0].rdtype != A_RECORD_RDTYPE:
-					print "Answer for %s was not A but %s" % (domain, response.answer[0].rdtype)
-					exit()
+				if response.answer[0].rdtype == CNAME_RECORD_RDTYPE:
+					cname = str(response.answer[0][0])[:-1]
+					print "Got CNAME for %s: %s" % (domain, cname)
 
-				answer_name = str(response.answer[0].name)[:-1]
-				answer_ip = str(response.answer[0][0])
-				domains_for_which_response_received[answer_name] = answer_ip
-				print "The answer is %s: %s" % (answer_name, answer_ip)
+					# If I were the one doing the resolving... and got a cname. How would I want the answer
+					# shown? What am I going to do with the answer? You're going to send a HTTP GET. So you 
+					# need to know the Host: right? You can't just replace the IP, you need the name too.
+					#
+					# No actually...
+					# If you encounter detail.tmall.com with CNAME detail.tmall.com.danuoyi.tbcache.com then
+					# you are supposed to connect to the IP of detail.tmall.com.danuoyi.tbcache.com BUT still
+					# say Host: detail.tmall.com
+					#
+					# So I don't need to record that it was a CNAME, IP should be enough.
+
+
+					exit()
+				elif response.answer[0].rdtype == A_RECORD_RDTYPE:
+					answer_name = str(response.answer[0].name)[:-1]
+					answer_ip = str(response.answer[0][0])
+					domains_for_which_response_received[answer_name] = answer_ip
+					print "The answer is %s: %s" % (answer_name, answer_ip)
+				else:
+					print "Answer rdtype for %s was not A but %s" % (domain, response.answer[0].rdtype)
+					exit()
 
 			elif response.authority: # Need to ask forward
 

@@ -9,15 +9,17 @@ import sys
 
 NO_DATA_ERRNO = 35
 DNS_PORT = 53
-MAX_CONCURRENT = 1
+MAX_CONCURRENT = 10
 A_RECORD_RDTYPE = 1
 CNAME_RECORD_RDTYPE = 5
 REASK_IN_SECONDS = 5
+NXDOMAIN_RCODE = 3
 
 # Initially ask about each domain from a random root server.
 root_servers = [socket.gethostbyname('%s.root-servers.net' % ch) for ch in 'abcdefghijkl']	
-# domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:125]
-domains = ['detail.tmall.com']
+domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:62]
+# domains = ['detail.tmall.com'] # CNAME example
+# domains = ['detail.tmall.com', 'thistotally1234doesnexist.com']
 domains_that_need_querying = [(domain, random.choice(root_servers)) for domain in domains]
 
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -42,9 +44,12 @@ def is_ip_address(str):
 	return all([ch in "0123456789." for ch in str])
 
 while True:
+
 	ongoing_count = len(domains_being_queried_latest_last)
 	todo_count = len(domains_that_need_querying)
-	print "Looping, %s queries ongoing (%s), %s to do (%s)" % (ongoing_count, [x[0] for x in domains_being_queried_latest_last], todo_count, [x[0] for x in domains_that_need_querying])
+	# print "Looping, %s queries ongoing (%s), %s to do (%s)" % (ongoing_count, [x[0] for x in domains_being_queried_latest_last], todo_count, [x[0] for x in domains_that_need_querying])
+	print "Looping, %s queries ongoing (%s), %s to do" % (ongoing_count, [x[0] for x in domains_being_queried_latest_last], todo_count)
+	time.sleep(0.2)
 
 	if ongoing_count > 0 and todo_count == 0:
 		print "Sleeping a bit since just waiting for replies..."
@@ -95,7 +100,18 @@ while True:
 				print "All done!"
 
 				for domain in domains:
-					print "\t%s\t%s" % (domain, domains_for_which_response_received[domain])
+					sys.stdout.write("\t%s\t" % domain)
+
+					d = domains_for_which_response_received[domain]
+					if d is None:
+						sys.stdout.write("NXDOMAIN")
+					else:
+						while not is_ip_address(d):
+							sys.stdout.write("%s -> " % d)
+							d = domains_for_which_response_received[d]
+						sys.stdout.write("%s" % d)
+
+					print
 
 				exit()
 	else:
@@ -108,14 +124,26 @@ while True:
 			data, addr = s.recvfrom(1024)
 			print "Received packet from %s" % addr[0]
 			response = dns.message.from_wire(data)
+
+			# print response.to_text()
 			domain = str(response.question[0].name)[:-1]
 
 			domains_being_queried_latest_last = [x for x in domains_being_queried_latest_last if x[0] != domain]
 
-			if response.answer:
+			if response.rcode() == NXDOMAIN_RCODE:
+				print "%s did not exist (NXDOMAIN)" % domain
+				domains_for_which_response_received[domain] = None
+
+			elif response.answer:
 				if response.answer[0].rdtype == CNAME_RECORD_RDTYPE:
 					cname = str(response.answer[0][0])[:-1]
 					print "Got CNAME for %s: %s" % (domain, cname)
+					# cnames[domain] = 
+					domains_for_which_response_received[domain] = cname
+
+					# Now need to resolve the CNAME as well
+					if not cname in domains_for_which_response_received:
+						domains_that_need_querying.insert(0, (cname, addr[0]))
 
 					# If I were the one doing the resolving... and got a cname. How would I want the answer
 					# shown? What am I going to do with the answer? You're going to send a HTTP GET. So you 
@@ -128,8 +156,7 @@ while True:
 					#
 					# So I don't need to record that it was a CNAME, IP should be enough.
 
-
-					exit()
+					# exit()
 				elif response.answer[0].rdtype == A_RECORD_RDTYPE:
 					answer_name = str(response.answer[0].name)[:-1]
 					answer_ip = str(response.answer[0][0])
@@ -175,10 +202,10 @@ while True:
 
 				print "Asking forward about %s to %s (%s)" % (domain, authority_name, next_ask)
 				domains_that_need_querying.append((domain, next_ask))
-				print domains_that_need_querying
+				# print domains_that_need_querying
 
 		except socket.error, e:
 			if e.errno == NO_DATA_ERRNO:
 				break
 			else:
-				print "Some other error on socket"
+				print "Some other error (%s) on socket" % e.errno

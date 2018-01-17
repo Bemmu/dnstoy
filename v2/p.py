@@ -5,22 +5,62 @@ import time
 import socket
 import dns
 import dns.message
+import dns.query
+import dns.zone
 import sys
 
 NO_DATA_ERRNO = 35
 DNS_PORT = 53
 MAX_CONCURRENT = 10
-A_RECORD_RDTYPE = 1
-CNAME_RECORD_RDTYPE = 5
 REASK_IN_SECONDS = 5
+
+A_RECORD_RDTYPE = 1
+NS_RDTYPE = 2
+CNAME_RECORD_RDTYPE = 5
+
+REFUSED_RCODE = 5
 NXDOMAIN_RCODE = 3
+
+TLD_ZONE_SERVER = 'lax.xfr.dns.icann.org' # https://www.dns.icann.org/services/axfr/
+
+print "Reading file."
+# domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:62]
+domains = ["gmw.cn"]
+tlds = list(set([d.split(".")[-1] for d in domains]))
+
+# https://www.dns.icann.org/services/axfr/
+print "Resolving %s" % TLD_ZONE_SERVER
+tld_zone_server = socket.gethostbyname(TLD_ZONE_SERVER)
+
+# Start by transferring zone describing TLDs
+tld_nameservers = {}
+print "Transferring zone."
+z = dns.zone.from_xfr(dns.query.xfr(tld_zone_server, ''))
+names = z.nodes.keys()
+names.sort()
+for i, n in enumerate(names):
+	tld = str(n)
+	if tld not in tlds: continue # Skip TLDs we aren't interested in
+
+	name_servers = map(str, z[n].get_rdataset(1, NS_RDTYPE))
+	print "Name servers for %s are %s" % (tld, ", ".join(name_servers[:-1]) + " and " + name_servers[-1])
+	print "Resolving name servers for %s" % n
+	name_servers = [socket.gethostbyname(ns) for ns in name_servers]
+	tld_nameservers[tld] = name_servers
 
 # Initially ask about each domain from a random root server.
 root_servers = [socket.gethostbyname('%s.root-servers.net' % ch) for ch in 'abcdefghijkl']	
-domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:62]
+# domains = []
 # domains = ['detail.tmall.com'] # CNAME example
 # domains = ['detail.tmall.com', 'thistotally1234doesnexist.com']
-domains_that_need_querying = [(domain, random.choice(root_servers)) for domain in domains]
+domains_that_need_querying = [(domain, random.choice(tld_nameservers[domain.split(".")[-1]])) for domain in domains]
+
+# If I query about "fr", the result cannot be an IP because there is no IP address for "fr" because
+# it's a zone.
+
+# Query TLDs first, then use their name servers for the rest of questions to spread work easily.
+# tlds = ["fr"]
+# domains_that_need_querying = [(tld, random.choice(tld_nameservers[tld])) for tld in tlds]
 
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 s.setblocking(False)
@@ -125,12 +165,17 @@ while True:
 			print "Received packet from %s" % addr[0]
 			response = dns.message.from_wire(data)
 
-			# print response.to_text()
+			print response.to_text()
 			domain = str(response.question[0].name)[:-1]
 
 			domains_being_queried_latest_last = [x for x in domains_being_queried_latest_last if x[0] != domain]
 
-			if response.rcode() == NXDOMAIN_RCODE:
+			if response.rcode() == REFUSED_RCODE:
+				# Name server didn't play nice, so try again from random root.
+				print "Refused. Resolving %s again from root." % domain
+				domains_that_need_querying.insert(0, (domain, random.choice(root_servers)))
+
+			elif response.rcode() == NXDOMAIN_RCODE:
 				print "%s did not exist (NXDOMAIN)" % domain
 				domains_for_which_response_received[domain] = None
 
@@ -171,8 +216,31 @@ while True:
 				# Looks like authority sections don't always give IP addresses for all authority servers.
 				# So now there is a dependency, need to resolve some name of server in auth section to continue.
 
+				# for a in response.authority:
+				# 	try:
+				# 		ns = str(a[0].mname)[:-1]
+				# 		print "Resolving %s by gethostbyname" % ns
+				# 		ip = socket.gethostbyname(ns)
+				# 		print "Authoritative name server for TLD %s is %s (%s)" % (domain, ns, ip)
+				# 	except Exception, e:
+				# 		print e
+				# 		pass
+
+					# print dir(a)
+					# print dir(a[0])
+					# print a.rdtype
+					# print str(a)
+					# print str(a[0])
+
 				# Authority section has the name servers to ask next.
-				authority_names = [str(auth) for auth in response.authority[0]]
+				# print "\n\t".join([str(a.rdtype) for a in response.authority[0]])
+				authority_names = [str(auth) for auth in response.authority[0] if auth.rdtype == NS_RDTYPE]
+				# print authority_names
+				# exit()
+
+				if not authority_names:
+					print "This is the end."
+					continue
 
 				# Additional section sometimes provides IP addresses for some of those servers for convenience.
 				for a in response.additional:
@@ -200,8 +268,13 @@ while True:
 				else:
 					print "Yes."
 
-				print "Asking forward about %s to %s (%s)" % (domain, authority_name, next_ask)
-				domains_that_need_querying.append((domain, next_ask))
+				print "Should asking forward about %s?" % domain
+
+				if domain in domains_for_which_response_received:
+					print "No, knew it already (%s)" % domains_for_which_response_received[domain]
+				else:
+					print "Yes, asking forward about %s to %s (%s)" % (domain, authority_name, next_ask)
+					domains_that_need_querying.append((domain, next_ask))
 				# print domains_that_need_querying
 
 		except socket.error, e:

@@ -1,4 +1,5 @@
-# 21 seconds to resolve 50 domains at 50 parallel
+# 16.01.2018: 21 seconds to resolve 50 domains at 50 parallel
+# 17.01.2018: 8 seconds
 
 import random
 import time
@@ -11,8 +12,8 @@ import sys
 
 NO_DATA_ERRNO = 35
 DNS_PORT = 53
-MAX_CONCURRENT = 10
-REASK_IN_SECONDS = 5
+MAX_CONCURRENT = 50
+REASK_IN_SECONDS = 1
 
 A_RECORD_RDTYPE = 1
 NS_RDTYPE = 2
@@ -23,9 +24,11 @@ NXDOMAIN_RCODE = 3
 
 TLD_ZONE_SERVER = 'lax.xfr.dns.icann.org' # https://www.dns.icann.org/services/axfr/
 
+root_servers = [socket.gethostbyname('%s.root-servers.net' % ch) for ch in 'abcdefghijkl']	
+
 print "Reading file."
-# domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:62]
-domains = ["gmw.cn"]
+domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:500]
+domains = ["asdfg.pro"]
 tlds = list(set([d.split(".")[-1] for d in domains]))
 
 # https://www.dns.icann.org/services/axfr/
@@ -42,14 +45,23 @@ for i, n in enumerate(names):
 	tld = str(n)
 	if tld not in tlds: continue # Skip TLDs we aren't interested in
 
-	name_servers = map(str, z[n].get_rdataset(1, NS_RDTYPE))
-	print "Name servers for %s are %s" % (tld, ", ".join(name_servers[:-1]) + " and " + name_servers[-1])
+	name_server_hosts = map(str, z[n].get_rdataset(1, NS_RDTYPE))
+	print "Name servers for %s are %s" % (tld, ", ".join(name_server_hosts[:-1]) + " and " + name_server_hosts[-1])
 	print "Resolving name servers for %s" % n
-	name_servers = [socket.gethostbyname(ns) for ns in name_servers]
+
+	name_servers = []
+	for host in name_server_hosts:
+		try:
+			name_servers.append(socket.gethostbyname(host))
+		except socket.gaierror:
+			pass # Sometimes can't resolve all, but that's OK as long as we have some
+
+	# If we didn't have any for this TLD, start with root instead.
+	if not name_servers:
+		name_servers = [random.choice(root_servers)]
+
 	tld_nameservers[tld] = name_servers
 
-# Initially ask about each domain from a random root server.
-root_servers = [socket.gethostbyname('%s.root-servers.net' % ch) for ch in 'abcdefghijkl']	
 # domains = []
 # domains = ['detail.tmall.com'] # CNAME example
 # domains = ['detail.tmall.com', 'thistotally1234doesnexist.com']
@@ -89,7 +101,7 @@ while True:
 	todo_count = len(domains_that_need_querying)
 	# print "Looping, %s queries ongoing (%s), %s to do (%s)" % (ongoing_count, [x[0] for x in domains_being_queried_latest_last], todo_count, [x[0] for x in domains_that_need_querying])
 	print "Looping, %s queries ongoing (%s), %s to do" % (ongoing_count, [x[0] for x in domains_being_queried_latest_last], todo_count)
-	time.sleep(0.2)
+	# time.sleep(0.2)
 
 	if ongoing_count > 0 and todo_count == 0:
 		print "Sleeping a bit since just waiting for replies..."
@@ -144,7 +156,7 @@ while True:
 
 					d = domains_for_which_response_received[domain]
 					if d is None:
-						sys.stdout.write("NXDOMAIN")
+						sys.stdout.write("None (NXDOMAIN or no ip)")
 					else:
 						while not is_ip_address(d):
 							sys.stdout.write("%s -> " % d)
@@ -239,7 +251,11 @@ while True:
 				# exit()
 
 				if not authority_names:
-					print "This is the end."
+
+					# Looks like this doesn't have an IP, for example googleusercontent.com
+					domains_for_which_response_received[domain] = None
+
+					# print "This is the end."
 					continue
 
 				# Additional section sometimes provides IP addresses for some of those servers for convenience.
@@ -268,7 +284,7 @@ while True:
 				else:
 					print "Yes."
 
-				print "Should asking forward about %s?" % domain
+				print "Should ask forward about %s?" % domain
 
 				if domain in domains_for_which_response_received:
 					print "No, knew it already (%s)" % domains_for_which_response_received[domain]
@@ -276,6 +292,22 @@ while True:
 					print "Yes, asking forward about %s to %s (%s)" % (domain, authority_name, next_ask)
 					domains_that_need_querying.append((domain, next_ask))
 				# print domains_that_need_querying
+
+			else:
+				# No authority and no answer, try again from root. This happened once when
+				# asked ns-646.awsdns-16.net (205.251.194.134) about soundcloud.com:
+				#
+				# Received packet from 205.251.194.134
+				# id 4378
+				# opcode QUERY
+				# rcode NOERROR
+				# flags QR AA TC RD
+				# ;QUESTION
+				# soundcloud.com. IN A
+				# ;ANSWER
+				# ;AUTHORITY
+				# ;ADDITIONAL
+				domains_that_need_querying.append((domain, random.choice(root_servers)))
 
 		except socket.error, e:
 			if e.errno == NO_DATA_ERRNO:

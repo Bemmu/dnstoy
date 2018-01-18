@@ -112,6 +112,9 @@ except:
 		pickle.dump(tld_nameservers, f)
 
 domains_that_need_querying = [(domain, random.choice(tld_nameservers[domain.split(".")[-1]])) for domain in domains]
+
+# domains_that_need_querying = [('ns1-d.dns.pipex.net', 'ns0-d.dns.pipex.net'), ('ns0-e.dns.pipex.net', 'ns1-d.dns.pipex.net')]
+
 # domains_that_need_querying = [('express.co.uk', 'ns0-e.dns.pipex.net')]
 # domains = ['lacloop.info']
 # domains_that_need_querying = [('lacloop.info', '88.208.5.2')]
@@ -356,7 +359,7 @@ while True:
 						logging.debug("Prevented asking name server %s for itself." % server)
 						continue
 
-					is_ip_known = server in domains_for_which_response_received
+					is_ip_known = server[:-1] in domains_for_which_response_received
 
 					try:
 						print "Checking %s for %s" % (last_pick_timestamps, server[:-1])

@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.DEBUG)
 NO_DATA_ERRNO = 35
 DNS_PORT = 53
 MAX_CONCURRENT = 5000
-REASK_IN_SECONDS = 0.25
+REASK_IN_SECONDS = 1.0
 
 A_RECORD_RDTYPE = 1
 NS_RDTYPE = 2
@@ -31,7 +31,7 @@ REFUSED_RCODE = 5
 NXDOMAIN_RCODE = 3
 
 # If end up asking about the same domain more than this many times, just give up on it.
-QUERY_GIVE_UP_THRESHOLD = 30
+QUERY_GIVE_UP_THRESHOLD = 16 # 16 needed to resolve pages.tmall.com
 
 TLD_ZONE_SERVER = 'lax.xfr.dns.icann.org' # https://www.dns.icann.org/services/axfr/
 
@@ -149,11 +149,11 @@ while True:
 	if todo_count < 80:
 		logging.info('todo: %s' % [x[0] for x in domains_that_need_querying])
 
-	# time.sleep(0.002)
+	# time.sleep(0.2)
 
 	if ongoing_count > 0 and todo_count == 0:
 		logging.debug("Sleeping a bit since just waiting for replies...")
-		time.sleep(0.05)
+		time.sleep(0.5)
 
 	# sys.stdout.write(".")
 	sys.stdout.flush()

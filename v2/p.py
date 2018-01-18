@@ -20,8 +20,8 @@ logging.basicConfig(level=logging.DEBUG)
 
 NO_DATA_ERRNO = 35
 DNS_PORT = 53
-MAX_CONCURRENT = 5000
-REASK_IN_SECONDS = 1.0
+MAX_CONCURRENT = 1
+REASK_IN_SECONDS = 5.0
 
 A_RECORD_RDTYPE = 1
 NS_RDTYPE = 2
@@ -38,8 +38,12 @@ TLD_ZONE_SERVER = 'lax.xfr.dns.icann.org' # https://www.dns.icann.org/services/a
 root_servers = [socket.gethostbyname('%s.root-servers.net' % ch) for ch in 'abcdefghijkl']	
 
 logging.info("Reading domain list.")
-domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:5000]
-domains = ["pages.tmall.com"]
+# domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:5000]
+# domains = ["pages.tmall.com"]
+# domains = ['yandex.ru', 'express.co.uk', 'olx.com.eg', 'dailystar.co.uk', 'e1.ru', 'pku.edu.cn', 'fudan.edu.cn', 'www.gov.cn.qingcdn.com']
+# domains = ['express.co.uk']
+domains = ['ns0-e.dns.pipex.net']
+
 tlds = list(set([d.split(".")[-1] for d in domains]))
 
 # Start by transferring zone describing TLDs
@@ -108,6 +112,7 @@ except:
 		pickle.dump(tld_nameservers, f)
 
 domains_that_need_querying = [(domain, random.choice(tld_nameservers[domain.split(".")[-1]])) for domain in domains]
+# domains_that_need_querying = [('express.co.uk', 'ns0-e.dns.pipex.net')]
 # domains = ['lacloop.info']
 # domains_that_need_querying = [('lacloop.info', '88.208.5.2')]
 
@@ -130,6 +135,9 @@ domains_being_queried_latest_last = [
 	# ('google.com', 5), ('example.com', 100)...
 ]
 
+# Records timestamps for when a name server was selected for querying, to avoid using same ones too much.
+last_pick_timestamps = {}
+
 def send_async_dns_query(domain, name_server_ip_address):
 	data = dns.message.make_query(domain, 'A').to_wire()
 	dest = (name_server_ip_address, DNS_PORT)
@@ -147,9 +155,9 @@ while True:
 	if ongoing_count < 80:
 		logging.info('ongoing: %s' % [x[0] for x in domains_being_queried_latest_last])
 	if todo_count < 80:
-		logging.info('todo: %s' % [x[0] for x in domains_that_need_querying])
+		logging.info('todo: %s' % [x for x in domains_that_need_querying])
 
-	# time.sleep(0.2)
+	time.sleep(0.4)
 
 	if ongoing_count > 0 and todo_count == 0:
 		logging.debug("Sleeping a bit since just waiting for replies...")
@@ -187,10 +195,6 @@ while True:
 				try:
 					ip = domains_for_which_response_received[next_ask]
 					logging.debug("Knew that %s is %s, asking there for %s later." % (next_ask, ip, domain))
-					if ip is None:
-						print "Just set to None!"
-						print "ip for %s was None" % next_ask
-						# exit()
 					next_ask = ip
 
 					# If there is nowhere to ask, then give up on this as well.
@@ -209,12 +213,11 @@ while True:
 				send_async_dns_query(domain, next_ask)
 				domains_being_queried_latest_last.append((domain, time.time()))
 			else:
-				print "Asked about %s too many times (%s), giving up." % (domain, query_count[domain])
+				logging.warning("Asked about %s too many times (%s), giving up." % (domain, query_count[domain]))
 				domains_for_which_response_received[domain] = None
 
 		except IndexError:
 			if len(domains_being_queried_latest_last) == 0:
-				print domains_for_which_response_received
 				print_results(domains_for_which_response_received, domains)
 				exit()
 	else:
@@ -330,13 +333,44 @@ while True:
 
 				# There might now be a number of name servers that could be asked next. To make things faster,
 				# prefer one for which IP address is already known.
-				known_ones = [auth[:-1] for auth in authority_names if auth[:-1] in domains_for_which_response_received]
-				if known_ones:
-					authority_name = random.choice(known_ones)
-					logging.debug("Picked random known authority: %s" % authority_name)
-				else:
-					authority_name = random.choice(authority_names)[:-1]
-					logging.debug("Didn't know any of them, so picked random authority: %s" % authority_name)
+# 				known_ones = [auth[:-1] for auth in authority_names if auth[:-1] in domains_for_which_response_received]
+# 				if known_ones:
+# 					options = known_ones
+# #					authority_name = random.choice(known_ones)
+# 					logging.debug("Picked random known authority: %s" % authority_name)
+# 				else:
+# #					authority_name = random.choice(authority_names)[:-1]
+# 					options = authority_names
+# 					logging.debug("Didn't know any of them, so picked random authority: %s" % authority_name)
+			
+				# Prioritize name servers as follows. 
+				#
+				# Most importantly pick one we haven't asked from recently.
+				# If there are multiple choices among those we haven't asked recently, then pick one we know IP for.
+				#
+				# Prefer a name server we haven't asked recently.
+
+				priorities_for_servers = []
+				for server in authority_names:
+					if server.lower()[:-1] == domain.lower():
+						logging.debug("Prevented asking name server %s for itself." % server)
+						continue
+
+					is_ip_known = server in domains_for_which_response_received
+
+					try:
+						print "Checking %s for %s" % (last_pick_timestamps, server[:-1])
+						seconds_elapsed_since_last_picked = time.time() - last_pick_timestamps[server[:-1]]
+					except KeyError:
+						seconds_elapsed_since_last_picked = 10**9
+
+					priority = seconds_elapsed_since_last_picked + is_ip_known
+					priorities_for_servers.append((priority, server))
+
+				logging.debug(sorted(priorities_for_servers, reverse = True))
+				authority_name = sorted(priorities_for_servers, reverse = True)[0][1]
+				authority_name = authority_name[:-1]
+				last_pick_timestamps[authority_name] = time.time()
 
 				# If this IP was not in additional, then need to resolve it first.
 				logging.debug("Do we know %s?" % authority_name)

@@ -41,8 +41,8 @@ logging.info("Reading domain list.")
 # domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:5000]
 # domains = ["pages.tmall.com"]
 # domains = ['yandex.ru', 'express.co.uk', 'olx.com.eg', 'dailystar.co.uk', 'e1.ru', 'pku.edu.cn', 'fudan.edu.cn', 'www.gov.cn.qingcdn.com']
-# domains = ['express.co.uk']
-domains = ['ns0-e.dns.pipex.net']
+domains = ['olx.com.eg']
+# domains = ['ns0-e.dns.pipex.net']
 
 tlds = list(set([d.split(".")[-1] for d in domains]))
 
@@ -377,7 +377,7 @@ while True:
 
 				logging.debug("Priorities: %s" % sorted(priorities_for_servers, reverse = True))
 				authority_name = sorted(priorities_for_servers, reverse = True)[0][1]
-				authority_name = authority_name[:-1]
+				authority_name = authority_name[:-1].lower()
 				logging.debug("Picked %s" % authority_name)
 				last_pick_timestamps[authority_name] = time.time()
 

@@ -239,6 +239,11 @@ while True:
 			except dns.message.TrailingJunk:
 				logging.debug("Failed to parse it. Trying again starting from random root.")
 
+			# It's possible that when receiving this packet, we had already learned the answer from another one.
+			if domain in domains_for_which_response_received:
+				logging.debug("%s was already known, skipping packet from %s" % (domain, addr[0]))
+				continue
+
 			if response is None:
 				domains_that_need_querying.insert(0, (domain, random.choice(root_servers)))
 
@@ -277,7 +282,7 @@ while True:
 
 					# exit()
 				elif response.answer[0].rdtype == A_RECORD_RDTYPE:
-					answer_name = str(response.answer[0].name)[:-1]
+					answer_name = str(response.answer[0].name)[:-1].lower()
 					answer_ip = str(response.answer[0][0])
 					domains_for_which_response_received[answer_name] = answer_ip
 					logging.debug("The answer is %s: %s" % (answer_name, answer_ip))
@@ -370,33 +375,29 @@ while True:
 					priority = seconds_elapsed_since_last_picked + is_ip_known
 					priorities_for_servers.append((priority, server))
 
-				logging.debug(sorted(priorities_for_servers, reverse = True))
+				logging.debug("Priorities: %s" % sorted(priorities_for_servers, reverse = True))
 				authority_name = sorted(priorities_for_servers, reverse = True)[0][1]
 				authority_name = authority_name[:-1]
+				logging.debug("Picked %s" % authority_name)
 				last_pick_timestamps[authority_name] = time.time()
 
 				# If this IP was not in additional, then need to resolve it first.
-				logging.debug("Do we know %s?" % authority_name)
-				next_ask = domains_for_which_response_received.get(authority_name)
-				if not next_ask:
-					logging.debug("No.")
+				logging.debug("%s known?" % authority_name)
+
+				try:
+					next_ask = domains_for_which_response_received[authority_name]
+					logging.debug("Yes. Knew %s has ip %s." % (authority_name, next_ask))
+				except KeyError:
+					logging.debug("No. Resolving %s first." % authority_name)
 					domains_that_need_querying.insert(0, (authority_name, random.choice(root_servers)))
 					next_ask = authority_name
-				else:
-					logging.debug("Yes.")
 
-				logging.debug("Should ask forward about %s?" % domain)
+				if not next_ask:
+					print "Was going to put None to next_ask!"
+					exit()
 
-				if domain in domains_for_which_response_received:
-					logging.debug("No, knew it already (%s)" % domains_for_which_response_received[domain])
-				else:
-					logging.debug("Yes, asking forward about %s to %s (%s)" % (domain, authority_name, next_ask))
-
-					if not next_ask:
-						print "Was going to put None to next_ask!"
-						exit()
-
-					domains_that_need_querying.append((domain, next_ask))
+				domains_that_need_querying.append((domain, next_ask))
+				logging.debug("Will try to resolve %s by asking %s" % domains_that_need_querying[-1])
 				# print domains_that_need_querying
 
 			else:

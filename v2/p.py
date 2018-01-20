@@ -41,7 +41,7 @@ logging.info("Reading domain list.")
 # domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:5000]
 # domains = ["pages.tmall.com"]
 # domains = ['yandex.ru', 'express.co.uk', 'olx.com.eg', 'dailystar.co.uk', 'e1.ru', 'pku.edu.cn', 'fudan.edu.cn', 'www.gov.cn.qingcdn.com']
-domains = ['olx.com.eg']
+domains = ['www.gov.cn.qingcdn.com']
 # domains = ['ns0-e.dns.pipex.net']
 
 tlds = list(set([d.split(".")[-1] for d in domains]))
@@ -96,10 +96,6 @@ def print_results(domains_for_which_response_received, domains):
 			sys.stdout.write("%s" % d)
 		print
 
-# domains = []
-# domains = ['detail.tmall.com'] # CNAME example
-# domains = ['detail.tmall.com', 'thistotally1234doesnexist.com']
-# domains = ['asdfg.pro']
 
 # Avoid doing too many zone transfers by caching into a file.
 try:
@@ -112,19 +108,6 @@ except:
 		pickle.dump(tld_nameservers, f)
 
 domains_that_need_querying = [(domain, random.choice(tld_nameservers[domain.split(".")[-1]])) for domain in domains]
-
-# domains_that_need_querying = [('ns1-d.dns.pipex.net', 'ns0-d.dns.pipex.net'), ('ns0-e.dns.pipex.net', 'ns1-d.dns.pipex.net')]
-
-# domains_that_need_querying = [('express.co.uk', 'ns0-e.dns.pipex.net')]
-# domains = ['lacloop.info']
-# domains_that_need_querying = [('lacloop.info', '88.208.5.2')]
-
-# If I query about "fr", the result cannot be an IP because there is no IP address for "fr" because
-# it's a zone.
-
-# Query TLDs first, then use their name servers for the rest of questions to spread work easily.
-# tlds = ["fr"]
-# domains_that_need_querying = [(tld, random.choice(tld_nameservers[tld])) for tld in tlds]
 
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 s.setblocking(False)
@@ -166,7 +149,6 @@ while True:
 		logging.debug("Sleeping a bit since just waiting for replies...")
 		time.sleep(0.5)
 
-	# sys.stdout.write(".")
 	sys.stdout.flush()
 
 	# Retry queries after some time
@@ -269,18 +251,9 @@ while True:
 							exit()
 						domains_that_need_querying.insert(0, (cname, addr[0]))
 
-					# If I were the one doing the resolving... and got a cname. How would I want the answer
-					# shown? What am I going to do with the answer? You're going to send a HTTP GET. So you 
-					# need to know the Host: right? You can't just replace the IP, you need the name too.
-					#
-					# No actually...
 					# If you encounter detail.tmall.com with CNAME detail.tmall.com.danuoyi.tbcache.com then
 					# you are supposed to connect to the IP of detail.tmall.com.danuoyi.tbcache.com BUT still
 					# say Host: detail.tmall.com
-					#
-					# So I don't need to record that it was a CNAME, IP should be enough.
-
-					# exit()
 				elif response.answer[0].rdtype == A_RECORD_RDTYPE:
 					answer_name = str(response.answer[0].name)[:-1].lower()
 					answer_ip = str(response.answer[0][0])
@@ -299,38 +272,13 @@ while True:
 					exit()
 
 			elif response.authority: # Need to ask forward
-
-				# Looks like authority sections don't always give IP addresses for all authority servers.
-				# So now there is a dependency, need to resolve some name of server in auth section to continue.
-
-				# for a in response.authority:
-				# 	try:
-				# 		ns = str(a[0].mname)[:-1]
-				# 		print "Resolving %s by gethostbyname" % ns
-				# 		ip = socket.gethostbyname(ns)
-				# 		print "Authoritative name server for TLD %s is %s (%s)" % (domain, ns, ip)
-				# 	except Exception, e:
-				# 		print e
-				# 		pass
-
-					# print dir(a)
-					# print dir(a[0])
-					# print a.rdtype
-					# print str(a)
-					# print str(a[0])
-
 				# Authority section has the name servers to ask next.
-				# print "\n\t".join([str(a.rdtype) for a in response.authority[0]])
 				authority_names = [str(auth) for auth in response.authority[0] if auth.rdtype == NS_RDTYPE]
-				# print authority_names
-				# exit()
 
 				if not authority_names:
 
 					# Looks like this doesn't have an IP, for example googleusercontent.com
 					domains_for_which_response_received[domain] = None
-
-					# print "This is the end."
 					continue
 
 				# Additional section sometimes provides IP addresses for some of those servers for convenience.
@@ -339,25 +287,10 @@ while True:
 						logging.debug("Recording %s as %s" % (str(a.name)[:-1], str(a[0])))
 						domains_for_which_response_received[str(a.name)[:-1]] = str(a[0])
 
-				# There might now be a number of name servers that could be asked next. To make things faster,
-				# prefer one for which IP address is already known.
-# 				known_ones = [auth[:-1] for auth in authority_names if auth[:-1] in domains_for_which_response_received]
-# 				if known_ones:
-# 					options = known_ones
-# #					authority_name = random.choice(known_ones)
-# 					logging.debug("Picked random known authority: %s" % authority_name)
-# 				else:
-# #					authority_name = random.choice(authority_names)[:-1]
-# 					options = authority_names
-# 					logging.debug("Didn't know any of them, so picked random authority: %s" % authority_name)
-			
-				# Prioritize name servers as follows. 
+				# Prioritize name servers as follows:
 				#
-				# Most importantly pick one we haven't asked from recently.
-				# If there are multiple choices among those we haven't asked recently, then pick one we know IP for.
-				#
-				# Prefer a name server we haven't asked recently.
-
+				# 1. Most importantly pick one we haven't asked from recently.
+				# 2. Multiple choices among those we haven't asked recently? Pick one we know IP for.
 				priorities_for_servers = []
 				for server in authority_names:
 					if server.lower()[:-1] == domain.lower():

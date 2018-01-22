@@ -209,15 +209,26 @@ def retry_queries():
 				logging.debug("Nothing expired (oldest %.2f seconds old)" % oldest_elapsed)
 				break
 
+def recvfrom():
+	return s.recvfrom(1024)
+
+def parse(data):
+	response = dns.message.from_wire(data)				
+	return response
+
+def log_response(response):
+	logging.debug(response.to_text())
+
 def receive_next_dns_reply():
 	global bytes_received
 
-	data, addr = s.recvfrom(1024)
-	logging.debug("Received packet from %s" % addr[0])
+	data, addr = recvfrom()
+
+	# logging.debug("Received packet from %s" % addr[0])
 	try:
 		bytes_received += len(data)
-		response = dns.message.from_wire(data)				
-		logging.debug(response.to_text())
+		response = parse(data)
+		log_response(response)
 	except dns.message.TrailingJunk:
 		logging.warning("Failed to parse response to %s from %s. Trying again starting from random root." % (domain, addr[0]))
 		domains_that_need_querying.insert(0, (domain, random.choice(root_servers)))
@@ -234,6 +245,8 @@ def handle_nxdomain(domain):
 	domains_for_which_response_received[domain] = None
 
 def handle_answer(response, domain):
+	global domains_that_need_querying
+
 	if response.answer[0].rdtype == CNAME_RECORD_RDTYPE:
 		cname = str(response.answer[0][0])[:-1]
 		logging.debug("Got CNAME for %s: %s" % (domain, cname))
@@ -266,6 +279,32 @@ def handle_answer(response, domain):
 		logging.debug("Answer rdtype for %s was not A but %s" % (domain, response.answer[0].rdtype))
 		exit()
 
+def get_seconds_elapsed_since_last_picked(server):
+	try:
+		seconds_elapsed_since_last_picked = time.time() - last_pick_timestamps[server[:-1]]
+	except KeyError:
+		seconds_elapsed_since_last_picked = 10**9
+	return seconds_elapsed_since_last_picked
+
+def prioritize_servers(authority_names):
+	# Prioritize name servers as follows:
+	#
+	# 1. Most importantly pick one we haven't asked from recently.
+	# 2. Multiple choices among those we haven't asked recently? Pick one we know IP for.
+	priorities_for_servers = []
+	for server in authority_names:
+		if server.lower()[:-1] == domain.lower():
+			logging.debug("Prevented asking name server %s for itself." % server)
+			return
+
+		is_ip_known = server[:-1] in domains_for_which_response_received
+		seconds_elapsed_since_last_picked = get_seconds_elapsed_since_last_picked(server)
+
+		priority = seconds_elapsed_since_last_picked + is_ip_known
+		priorities_for_servers.append((priority, server))
+
+	return priorities_for_servers
+
 def handle_authority(response, domain):
 	# Authority section has the name servers to ask next.
 	authority_names = [str(auth) for auth in response.authority[0] if auth.rdtype == NS_RDTYPE]
@@ -282,26 +321,7 @@ def handle_authority(response, domain):
 			logging.debug("Recording %s as %s" % (str(a.name)[:-1], str(a[0])))
 			domains_for_which_response_received[str(a.name)[:-1]] = str(a[0])
 
-	# Prioritize name servers as follows:
-	#
-	# 1. Most importantly pick one we haven't asked from recently.
-	# 2. Multiple choices among those we haven't asked recently? Pick one we know IP for.
-	priorities_for_servers = []
-	for server in authority_names:
-		if server.lower()[:-1] == domain.lower():
-			logging.debug("Prevented asking name server %s for itself." % server)
-			return
-
-		is_ip_known = server[:-1] in domains_for_which_response_received
-
-		try:
-			logging.debug("Checking %s for %s" % (last_pick_timestamps, server[:-1]))
-			seconds_elapsed_since_last_picked = time.time() - last_pick_timestamps[server[:-1]]
-		except KeyError:
-			seconds_elapsed_since_last_picked = 10**9
-
-		priority = seconds_elapsed_since_last_picked + is_ip_known
-		priorities_for_servers.append((priority, server))
+	priorities_for_servers = prioritize_servers(authority_names)
 
 	# No options? I guess we failed.
 	if not priorities_for_servers:

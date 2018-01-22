@@ -224,6 +224,116 @@ def receive_next_dns_reply():
 
 	return response, addr
 
+def handle_refused_rcode(domain):
+	# Name server didn't play nice, so try again from random root.
+	logging.debug("Refused. Resolving %s again from root." % domain)
+	domains_that_need_querying.insert(0, (domain, random.choice(root_servers)))
+
+def handle_nxdomain(domain):
+	logging.debug("%s did not exist (NXDOMAIN)" % domain)
+	domains_for_which_response_received[domain] = None
+
+def handle_answer(response, domain):
+	if response.answer[0].rdtype == CNAME_RECORD_RDTYPE:
+		cname = str(response.answer[0][0])[:-1]
+		logging.debug("Got CNAME for %s: %s" % (domain, cname))
+		domains_for_which_response_received[domain] = cname
+
+		# Now need to resolve the CNAME as well
+		if not cname in domains_for_which_response_received:
+			if addr[0] is None:
+				print "addr[0] was None!"
+				exit()
+			domains_that_need_querying.insert(0, (cname, addr[0]))
+
+		# If you encounter detail.tmall.com with CNAME detail.tmall.com.danuoyi.tbcache.com then
+		# you are supposed to connect to the IP of detail.tmall.com.danuoyi.tbcache.com BUT still
+		# say Host: detail.tmall.com
+	elif response.answer[0].rdtype == A_RECORD_RDTYPE:
+		answer_name = str(response.answer[0].name)[:-1].lower()
+		answer_ip = str(response.answer[0][0])
+		domains_for_which_response_received[answer_name] = answer_ip
+		logging.debug("The answer is %s: %s" % (answer_name, answer_ip))
+
+		# Make sure not to ask about this again if we have it queued.
+		before = len(domains_that_need_querying)
+		domains_that_need_querying = [(d, n) for d,n in domains_that_need_querying if d != answer_name]
+		after = len(domains_that_need_querying)
+		if before != after:
+			logging.debug("Removed %s from todo list." % answer_name)
+
+	else:
+		logging.debug("Answer rdtype for %s was not A but %s" % (domain, response.answer[0].rdtype))
+		exit()
+
+def handle_authority(response, domain):
+	# Authority section has the name servers to ask next.
+	authority_names = [str(auth) for auth in response.authority[0] if auth.rdtype == NS_RDTYPE]
+
+	if not authority_names:
+
+		# Looks like this doesn't have an IP, for example googleusercontent.com
+		domains_for_which_response_received[domain] = None
+		return
+
+	# Additional section sometimes provides IP addresses for some of those servers for convenience.
+	for a in response.additional:
+		if a.rdtype == A_RECORD_RDTYPE:
+			logging.debug("Recording %s as %s" % (str(a.name)[:-1], str(a[0])))
+			domains_for_which_response_received[str(a.name)[:-1]] = str(a[0])
+
+	# Prioritize name servers as follows:
+	#
+	# 1. Most importantly pick one we haven't asked from recently.
+	# 2. Multiple choices among those we haven't asked recently? Pick one we know IP for.
+	priorities_for_servers = []
+	for server in authority_names:
+		if server.lower()[:-1] == domain.lower():
+			logging.debug("Prevented asking name server %s for itself." % server)
+			return
+
+		is_ip_known = server[:-1] in domains_for_which_response_received
+
+		try:
+			logging.debug("Checking %s for %s" % (last_pick_timestamps, server[:-1]))
+			seconds_elapsed_since_last_picked = time.time() - last_pick_timestamps[server[:-1]]
+		except KeyError:
+			seconds_elapsed_since_last_picked = 10**9
+
+		priority = seconds_elapsed_since_last_picked + is_ip_known
+		priorities_for_servers.append((priority, server))
+
+	# No options? I guess we failed.
+	if not priorities_for_servers:
+		logging.warning("No options for %s" % domain)
+		return
+
+	logging.debug("Priorities: %s" % sorted(priorities_for_servers, reverse = True))
+	authority_name = sorted(priorities_for_servers, reverse = True)[0][1]
+	authority_name = authority_name[:-1].lower()
+	logging.debug("Picked %s" % authority_name)
+	last_pick_timestamps[authority_name] = time.time()
+
+	# If this IP was not in additional, then need to resolve it first.
+	logging.debug("%s known?" % authority_name)
+
+	try:
+		next_ask = domains_for_which_response_received[authority_name]
+		logging.debug("Yes. Knew %s has ip %s." % (authority_name, next_ask))
+	except KeyError:
+		logging.debug("No. Resolving %s first." % authority_name)
+		domains_that_need_querying.insert(0, (authority_name, random.choice(root_servers)))
+		next_ask = authority_name
+
+	if not next_ask:
+		print "Was going to put None to next_ask!"
+		exit()
+
+	domains_that_need_querying.append((domain, next_ask))
+	logging.debug("Will try to resolve %s by asking %s" % domains_that_need_querying[-1])
+	# print domains_that_need_querying
+
+
 def handle_response(response):
 	global domains_that_need_querying
 
@@ -231,114 +341,13 @@ def handle_response(response):
 		domains_that_need_querying.insert(0, (domain, random.choice(root_servers)))
 
 	elif response.rcode() == REFUSED_RCODE:
-		# Name server didn't play nice, so try again from random root.
-		logging.debug("Refused. Resolving %s again from root." % domain)
-		domains_that_need_querying.insert(0, (domain, random.choice(root_servers)))
-
+		handle_refused_rcode(domain)
 	elif response.rcode() == NXDOMAIN_RCODE:
-		logging.debug("%s did not exist (NXDOMAIN)" % domain)
-		domains_for_which_response_received[domain] = None
-
+		handle_nxdomain(domain)
 	elif response.answer:
-		if response.answer[0].rdtype == CNAME_RECORD_RDTYPE:
-			cname = str(response.answer[0][0])[:-1]
-			logging.debug("Got CNAME for %s: %s" % (domain, cname))
-			domains_for_which_response_received[domain] = cname
-
-			# Now need to resolve the CNAME as well
-			if not cname in domains_for_which_response_received:
-				if addr[0] is None:
-					print "addr[0] was None!"
-					exit()
-				domains_that_need_querying.insert(0, (cname, addr[0]))
-
-			# If you encounter detail.tmall.com with CNAME detail.tmall.com.danuoyi.tbcache.com then
-			# you are supposed to connect to the IP of detail.tmall.com.danuoyi.tbcache.com BUT still
-			# say Host: detail.tmall.com
-		elif response.answer[0].rdtype == A_RECORD_RDTYPE:
-			answer_name = str(response.answer[0].name)[:-1].lower()
-			answer_ip = str(response.answer[0][0])
-			domains_for_which_response_received[answer_name] = answer_ip
-			logging.debug("The answer is %s: %s" % (answer_name, answer_ip))
-
-			# Make sure not to ask about this again if we have it queued.
-			before = len(domains_that_need_querying)
-			domains_that_need_querying = [(d, n) for d,n in domains_that_need_querying if d != answer_name]
-			after = len(domains_that_need_querying)
-			if before != after:
-				logging.debug("Removed %s from todo list." % answer_name)
-
-		else:
-			logging.debug("Answer rdtype for %s was not A but %s" % (domain, response.answer[0].rdtype))
-			exit()
-
+		handle_answer(response, domain)
 	elif response.authority: # Need to ask forward
-		# Authority section has the name servers to ask next.
-		authority_names = [str(auth) for auth in response.authority[0] if auth.rdtype == NS_RDTYPE]
-
-		if not authority_names:
-
-			# Looks like this doesn't have an IP, for example googleusercontent.com
-			domains_for_which_response_received[domain] = None
-			return
-
-		# Additional section sometimes provides IP addresses for some of those servers for convenience.
-		for a in response.additional:
-			if a.rdtype == A_RECORD_RDTYPE:
-				logging.debug("Recording %s as %s" % (str(a.name)[:-1], str(a[0])))
-				domains_for_which_response_received[str(a.name)[:-1]] = str(a[0])
-
-		# Prioritize name servers as follows:
-		#
-		# 1. Most importantly pick one we haven't asked from recently.
-		# 2. Multiple choices among those we haven't asked recently? Pick one we know IP for.
-		priorities_for_servers = []
-		for server in authority_names:
-			if server.lower()[:-1] == domain.lower():
-				logging.debug("Prevented asking name server %s for itself." % server)
-				return
-
-			is_ip_known = server[:-1] in domains_for_which_response_received
-
-			try:
-				logging.debug("Checking %s for %s" % (last_pick_timestamps, server[:-1]))
-				seconds_elapsed_since_last_picked = time.time() - last_pick_timestamps[server[:-1]]
-			except KeyError:
-				seconds_elapsed_since_last_picked = 10**9
-
-			priority = seconds_elapsed_since_last_picked + is_ip_known
-			priorities_for_servers.append((priority, server))
-
-		# No options? I guess we failed.
-		if not priorities_for_servers:
-			logging.warning("No options for %s" % domain)
-			return
-
-		logging.debug("Priorities: %s" % sorted(priorities_for_servers, reverse = True))
-		authority_name = sorted(priorities_for_servers, reverse = True)[0][1]
-		authority_name = authority_name[:-1].lower()
-		logging.debug("Picked %s" % authority_name)
-		last_pick_timestamps[authority_name] = time.time()
-
-		# If this IP was not in additional, then need to resolve it first.
-		logging.debug("%s known?" % authority_name)
-
-		try:
-			next_ask = domains_for_which_response_received[authority_name]
-			logging.debug("Yes. Knew %s has ip %s." % (authority_name, next_ask))
-		except KeyError:
-			logging.debug("No. Resolving %s first." % authority_name)
-			domains_that_need_querying.insert(0, (authority_name, random.choice(root_servers)))
-			next_ask = authority_name
-
-		if not next_ask:
-			print "Was going to put None to next_ask!"
-			exit()
-
-		domains_that_need_querying.append((domain, next_ask))
-		logging.debug("Will try to resolve %s by asking %s" % domains_that_need_querying[-1])
-		# print domains_that_need_querying
-
+		handle_authority(response, domain)
 	else:
 		# No authority and no answer, try again from root. This happened once when
 		# asked ns-646.awsdns-16.net (205.251.194.134) about soundcloud.com:

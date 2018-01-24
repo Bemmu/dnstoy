@@ -16,11 +16,11 @@ import collections
 
 query_count = collections.defaultdict(int) 
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
 NO_DATA_ERRNO = 35
 DNS_PORT = 53
-MAX_CONCURRENT = 1000
+MAX_CONCURRENT = 1
 REASK_IN_SECONDS = 20.0
 
 A_RECORD_RDTYPE = 1
@@ -43,6 +43,7 @@ domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:500
 # domains = ['yandex.ru', 'express.co.uk', 'olx.com.eg', 'dailystar.co.uk', 'e1.ru', 'pku.edu.cn', 'fudan.edu.cn', 'www.gov.cn.qingcdn.com']
 # domains = ['www.gov.cn.qingcdn.com']
 # domains = ['ns0-e.dns.pipex.net']
+domains = ['ads.gold']
 
 tlds = list(set([d.split(".")[-1] for d in domains]))
 
@@ -108,6 +109,7 @@ except:
 		pickle.dump(tld_nameservers, f)
 
 domains_that_need_querying = [(domain, random.choice(tld_nameservers[domain.split(".")[-1]])) for domain in domains]
+logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 s.setblocking(False)
@@ -150,6 +152,7 @@ def send_queries():
 		try:
 			# print "Do one (%s)" % len(domains_being_queried_latest_last)
 			domain, next_ask = domains_that_need_querying.pop(0)
+			logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 			if next_ask is None:
 				print "Popped a None!"
 				exit()
@@ -172,8 +175,9 @@ def send_queries():
 					logging.debug("Didn't know the ip address for %s yet, try again later." % next_ask)
 
 				if next_ask:
-					domains_that_need_querying.append((domain, next_ask))
-					print "Adding %s" % domains_that_need_querying[-1]
+					domains_that_need_querying.append((domain, next_ask))					
+					logging.debug("Domains that need querying: %s" % domains_that_need_querying)
+					print "Need to ask about %s to %s" % domains_that_need_querying[-1]
 				return
 
 			query_count[domain] += 1
@@ -203,6 +207,7 @@ def retry_queries():
 			if oldest_elapsed > REASK_IN_SECONDS:
 				domains_being_queried_latest_last.pop(0)
 				domains_that_need_querying.insert(0, (domain, random.choice(root_servers)))
+				logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 				logging.debug("Answer for %s took too long, asking again starting from root." % domain)
 				break
 			else:
@@ -232,6 +237,7 @@ def receive_next_dns_reply():
 	except dns.message.TrailingJunk:
 		logging.warning("Failed to parse response to %s from %s. Trying again starting from random root." % (domain, addr[0]))
 		domains_that_need_querying.insert(0, (domain, random.choice(root_servers)))
+		logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
 	return response, addr
 
@@ -239,6 +245,7 @@ def handle_refused_rcode(domain):
 	# Name server didn't play nice, so try again from random root.
 	logging.debug("Refused. Resolving %s again from root." % domain)
 	domains_that_need_querying.insert(0, (domain, random.choice(root_servers)))
+	logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
 def handle_nxdomain(domain):
 	logging.debug("%s did not exist (NXDOMAIN)" % domain)
@@ -258,6 +265,7 @@ def handle_answer(response, domain):
 				print "addr[0] was None!"
 				exit()
 			domains_that_need_querying.insert(0, (cname, addr[0]))
+			logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
 		# If you encounter detail.tmall.com with CNAME detail.tmall.com.danuoyi.tbcache.com then
 		# you are supposed to connect to the IP of detail.tmall.com.danuoyi.tbcache.com BUT still
@@ -271,6 +279,7 @@ def handle_answer(response, domain):
 		# Make sure not to ask about this again if we have it queued.
 		before = len(domains_that_need_querying)
 		domains_that_need_querying = [(d, n) for d,n in domains_that_need_querying if d != answer_name]
+		logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 		after = len(domains_that_need_querying)
 		if before != after:
 			logging.debug("Removed %s from todo list." % answer_name)
@@ -306,6 +315,8 @@ def prioritize_servers(authority_names):
 	return priorities_for_servers
 
 def handle_authority(response, domain):
+	logging.debug("Handling auth section for %s" % domain)
+
 	# Authority section has the name servers to ask next.
 	authority_names = [str(auth) for auth in response.authority[0] if auth.rdtype == NS_RDTYPE]
 
@@ -343,6 +354,7 @@ def handle_authority(response, domain):
 	except KeyError:
 		logging.debug("No. Resolving %s first." % authority_name)
 		domains_that_need_querying.insert(0, (authority_name, random.choice(root_servers)))
+		logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 		next_ask = authority_name
 
 	if not next_ask:
@@ -350,15 +362,17 @@ def handle_authority(response, domain):
 		exit()
 
 	domains_that_need_querying.append((domain, next_ask))
+	logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 	logging.debug("Will try to resolve %s by asking %s" % domains_that_need_querying[-1])
 	# print domains_that_need_querying
 
 
-def handle_response(response):
+def handle_response(response, domain):
 	global domains_that_need_querying
 
 	if response is None:
 		domains_that_need_querying.insert(0, (domain, random.choice(root_servers)))
+		logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
 	elif response.rcode() == REFUSED_RCODE:
 		handle_refused_rcode(domain)
@@ -383,6 +397,7 @@ def handle_response(response):
 		# ;AUTHORITY
 		# ;ADDITIONAL
 		domains_that_need_querying.append((domain, random.choice(root_servers)))
+		logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
 
 def read_all_from_socket():
@@ -406,7 +421,7 @@ def read_all_from_socket():
 				logging.debug("%s was already known, skipping packet from %s" % (domain, addr[0]))
 				continue
 
-			handle_response(response)
+			handle_response(response, domain)
 
 		except socket.error, e:
 			if e.errno == NO_DATA_ERRNO:
@@ -429,7 +444,7 @@ while True:
 	# if todo_count < 80:
 	# 	logging.info('todo: %s' % [x for x in domains_that_need_querying])
 
-	# time.sleep(0.4)
+	time.sleep(0.4)
 
 	if ongoing_count > 0 and todo_count == 0:
 		logging.info("Sleeping a bit since just waiting for replies...")

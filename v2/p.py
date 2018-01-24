@@ -1,3 +1,6 @@
+MAX_CONCURRENT = 1000
+REASK_IN_SECONDS = 5.0
+
 # 16.01.2018: 21 seconds to resolve 50 domains at 50 parallel
 # 17.01.2018: 8 seconds
 # 18.01.2018: 7 seconds to resolve 500 domains at 500 parallel
@@ -18,17 +21,13 @@ query_count = collections.defaultdict(int)
 
 logging.basicConfig(level=logging.INFO)
 
-NO_DATA_ERRNO = 35
-DNS_PORT = 53
-MAX_CONCURRENT = 1000
-REASK_IN_SECONDS = 5.0
-
 A_RECORD_RDTYPE = 1
 NS_RDTYPE = 2
 CNAME_RECORD_RDTYPE = 5
-
 REFUSED_RCODE = 5
 NXDOMAIN_RCODE = 3
+NO_DATA_ERRNO = 35
+DNS_PORT = 53
 
 # If end up asking about the same domain more than this many times, just give up on it.
 QUERY_GIVE_UP_THRESHOLD = 16 # 16 needed to resolve pages.tmall.com
@@ -59,9 +58,9 @@ domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:500
 # domains = ['ns0-e.dns.pipex.net']
 # domains = ['ads.gold']
 # domains = ['oxforddictionaries.com']
+domains = ['google.com']
 
 tlds = list(set([d.split(".")[-1] for d in domains]))
-
 
 def random_name_server_by_tld(domain):
 	tld = domain.split(".")[-1].lower()
@@ -134,11 +133,18 @@ except:
 	with open('zone.pickle', 'w') as f:
 		pickle.dump(tld_nameservers, f)
 
+# Just to make lookups faster, records whether a domain is in domains_that_need_querying or domains_being_queried_latest_last
+in_todo_or_ongoing = {}
+
 domains_that_need_querying = [(domain, random_name_server_by_tld(domain)) for domain in domains]
+for domain, _ in domains_that_need_querying:
+	in_todo_or_ongoing[domain] = True
 
 def add_to_todo(domain, first = True, next_ask = None):
-	if domain in [x[0] for x in domains_that_need_querying]:
+	if domain in in_todo_or_ongoing:
 		logging.debug("Domain %s was already being queried" % domain)
+		print domains_that_need_querying
+		print domains_being_queried_latest_last
 	else:
 		if not next_ask:
 			next_ask = random_name_server_by_tld(domain)
@@ -147,13 +153,15 @@ def add_to_todo(domain, first = True, next_ask = None):
 			domains_that_need_querying.insert(0, (domain, next_ask))
 		else:			
 			domains_that_need_querying.append((domain, next_ask))
+
+		in_todo_or_ongoing[domain] = True
+
 	# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
 # logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 s.setblocking(False)
-
 
 domains_being_queried_latest_last = [
 	# ('google.com', 5), ('example.com', 100)...
@@ -189,6 +197,7 @@ def send_queries():
 		try:
 			# print "Do one (%s)" % len(domains_being_queried_latest_last)
 			domain, next_ask = domains_that_need_querying.pop(0)
+			del in_todo_or_ongoing[domain]
 
 			if domain in resolved_domains:
 				logging.debug("Almost asked about %s despite knowing answer %s already" % (domain, resolved_domains[domain]))
@@ -239,6 +248,7 @@ def send_queries():
 				send_async_dns_query(domain, next_ask)
 				messages_sent += 1
 				domains_being_queried_latest_last.append((domain, time.time()))
+				in_todo_or_ongoing[domain] = True
 			else:
 				logging.warning("Asked about %s too many times (%s), giving up." % (domain, query_count[domain]))
 				logging.warning("Would have asked %s" % next_ask)
@@ -261,6 +271,7 @@ def retry_queries():
 			oldest_elapsed = time.time() - query_timestamp
 			if oldest_elapsed > REASK_IN_SECONDS:
 				domains_being_queried_latest_last.pop(0)
+				del in_todo_or_ongoing[domain]
 				if "root-servers.net" in domain:
 					print "Foo2"
 					exit()
@@ -287,11 +298,11 @@ def receive_next_dns_reply():
 
 	data, addr = recvfrom()
 
-	# logging.debug("Received packet from %s" % addr[0])
+	logging.debug("Received packet from %s" % addr[0])
 	try:
 		bytes_received += len(data)
 		response = parse(data)
-		# log_response(response)
+		log_response(response)
 	except dns.message.TrailingJunk:
 		logging.warning("Failed to parse response to %s from %s. Trying again starting from random root." % (domain, addr[0]))
 		if "root-servers.net" in domain:
@@ -340,10 +351,15 @@ def handle_answer(response, domain):
 		answer_ip = str(response.answer[0][0])
 		resolved_domains[answer_name] = answer_ip
 		logging.debug("The answer is %s: %s" % (answer_name, answer_ip))
+		print resolved_domains
 
 		# Make sure not to ask about this again if we have it queued.
 		before = len(domains_that_need_querying)
 		domains_that_need_querying = [(d, n) for d,n in domains_that_need_querying if d != answer_name]
+		try:
+			del in_todo_or_ongoing[answer_name]
+		except KeyError:
+			pass # not necessarily there
 		# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 		after = len(domains_that_need_querying)
 		if before != after:
@@ -407,17 +423,17 @@ def choose_authority(authority_names):
 
 def ask_forward(authority_name, domain):
 	# If this IP was not in additional, then need to resolve it first.
-	# logging.debug("%s known?" % authority_name)
+	logging.debug("%s known?" % authority_name)
 
 	try:
 		next_ask = resolved_domains[authority_name]
-		# logging.debug("Yes. Knew %s has ip %s." % (authority_name, next_ask))
+		logging.debug("Yes. Knew %s has ip %s." % (authority_name, next_ask))
 
 		if not next_ask:
 			print "Was going to put None to next_ask part 1 because authority %s of domain %s was resolved to None!" % (authority_name, domain)
 			exit()
 	except KeyError:
-		# logging.debug("No. Resolving %s first." % authority_name)
+		logging.debug("No. Resolving %s first." % authority_name)
 		if "root-servers.net" in authority_name:
 			print authority_name
 			print "Foo6"
@@ -437,7 +453,7 @@ def ask_forward(authority_name, domain):
 	add_to_todo(domain, first = False, next_ask = next_ask)
 
 	# domains_that_need_querying.append((domain, next_ask))
-	# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
+	logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 	# logging.debug("Will try to resolve %s by asking %s" % domains_that_need_querying[-1])
 	# print domains_that_need_querying
 
@@ -522,6 +538,8 @@ def read_all_from_socket():
 
 			domain = str(response.question[0].name)[:-1]
 			domains_being_queried_latest_last = [x for x in domains_being_queried_latest_last if x[0] != domain]
+			del in_todo_or_ongoing[domain]
+
 			replies_received_count += 1
 
 			# It's possible that when receiving this packet, we had already learned the answer from another one.

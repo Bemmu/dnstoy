@@ -35,7 +35,21 @@ QUERY_GIVE_UP_THRESHOLD = 16 # 16 needed to resolve pages.tmall.com
 
 TLD_ZONE_SERVER = 'lax.xfr.dns.icann.org' # https://www.dns.icann.org/services/axfr/
 
-root_servers = [socket.gethostbyname('%s.root-servers.net' % ch) for ch in 'abcdefghijkl']	
+resolved_domains = {
+	# 'google.com' : '1.2.3.4' 
+	# None means NXDOMAIN
+}
+
+root_servers = []
+def resolve_root_servers():
+	for ch in 'abcdefghijklm':
+		domain = '%s.root-servers.net' % ch
+		ip = socket.gethostbyname(domain)
+		root_servers.append(ip)
+		resolved_domains[domain] = ip
+
+resolve_root_servers()
+print resolved_domains
 
 logging.info("Reading domain list.")
 domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:500]
@@ -48,12 +62,15 @@ domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:500
 
 tlds = list(set([d.split(".")[-1] for d in domains]))
 
+
 def random_name_server_by_tld(domain):
 	tld = domain.split(".")[-1].lower()
 	try:
-		return random.choice(tld_nameservers[tld])
+		name_server = random.choice(tld_nameservers[tld])
 	except KeyError:
-		return random.choice(root_servers)
+		name_server = random.choice(root_servers)
+
+	return name_server
 
 # Start by transferring zone describing TLDs
 def transfer_zone():
@@ -88,17 +105,17 @@ def transfer_zone():
 		tld_nameservers[tld] = name_servers
 	return tld_nameservers
 
-def print_results(domains_for_which_response_received, domains):
+def print_results(resolved_domains, domains):
 	fn = "resolved_domains.csv"
 	logging.info("Writing results to %s" % fn)
 	with open(fn, "w") as f:
 		for domain in domains:
 			f.write("%s, " % domain)
 
-			d = domains_for_which_response_received[domain]
+			d = resolved_domains[domain]
 			while d is not None and not is_ip_address(d):
 				# f.write("%s -> " % d)
-				d = domains_for_which_response_received[d]
+				d = resolved_domains[d]
 
 			if d is None:
 				# f.write("None (NXDOMAIN or no ip)")
@@ -118,15 +135,22 @@ except:
 		pickle.dump(tld_nameservers, f)
 
 domains_that_need_querying = [(domain, random_name_server_by_tld(domain)) for domain in domains]
+
+def add_to_todo(domain, first = True):
+	if domain in [x[0] for x in domains_that_need_querying]:
+		logging.debug("Domain %s was already being queried" % domain)
+	else:
+		if first:
+			domains_that_need_querying.insert(0, (domain, random_name_server_by_tld(domain)))
+		else:			
+			domains_that_need_querying.append((domain, random_name_server_by_tld(domain)))
+	# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
+
 # logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 s.setblocking(False)
 
-domains_for_which_response_received = {
-	# 'google.com' : '1.2.3.4' 
-	# None means NXDOMAIN
-}
 
 domains_being_queried_latest_last = [
 	# ('google.com', 5), ('example.com', 100)...
@@ -162,6 +186,11 @@ def send_queries():
 		try:
 			# print "Do one (%s)" % len(domains_being_queried_latest_last)
 			domain, next_ask = domains_that_need_querying.pop(0)
+
+			if domain in resolved_domains:
+				logging.debug("Almost asked about %s despite knowing answer %s already" % (domain, resolved_domains[domain]))
+				continue
+
 			# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 			if next_ask is None:
 				print "Popped a None!"
@@ -174,7 +203,7 @@ def send_queries():
 				# Translate name to IP address if we know it already.
 				try:
 					try:
-						ip = domains_for_which_response_received[next_ask]
+						ip = resolved_domains[next_ask]
 					except TypeError, e:
 						print "Next ask is", next_ask
 						print "%s" % e
@@ -184,29 +213,37 @@ def send_queries():
 
 					# If there is nowhere to ask, then give up on this as well.
 					if next_ask is None:
-						domains_for_which_response_received[domain] = None
+						resolved_domains[domain] = None
 
 				except KeyError:
 					logging.debug("Didn't know the ip address for %s yet, try again later." % next_ask)
 
 				if next_ask:
-					domains_that_need_querying.append((domain, next_ask))					
+					if "root-servers.net" in domain:
+						print "Foo1"
+						exit()
+
+					add_to_todo(domain, first = False)
+
 					# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 					logging.debug("Need to ask about %s to %s" % domains_that_need_querying[-1])
 				return
 
 			query_count[domain] += 1
 			if query_count[domain] <= QUERY_GIVE_UP_THRESHOLD:
+				if "ns8-l2.nic.ru" in domain:
+					print "Sending packet about %s to %s" % (domain, next_ask)
 				send_async_dns_query(domain, next_ask)
 				messages_sent += 1
 				domains_being_queried_latest_last.append((domain, time.time()))
 			else:
 				logging.warning("Asked about %s too many times (%s), giving up." % (domain, query_count[domain]))
-				domains_for_which_response_received[domain] = None
+				logging.warning("Would have asked %s" % next_ask)
+				resolved_domains[domain] = None
 
 		except IndexError:
 			if len(domains_being_queried_latest_last) == 0:
-				print_results(domains_for_which_response_received, domains)
+				print_results(resolved_domains, domains)
 				exit()
 	else:
 		pass
@@ -221,8 +258,11 @@ def retry_queries():
 			oldest_elapsed = time.time() - query_timestamp
 			if oldest_elapsed > REASK_IN_SECONDS:
 				domains_being_queried_latest_last.pop(0)
-				domains_that_need_querying.insert(0, (domain, random_name_server_by_tld(domain)))
-				# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
+				if "root-servers.net" in domain:
+					print "Foo2"
+					exit()
+
+				add_to_todo(domain, first = True)
 				logging.debug("Answer for %s took too long, asking again starting from root." % domain)
 				break
 			else:
@@ -251,8 +291,11 @@ def receive_next_dns_reply():
 		# log_response(response)
 	except dns.message.TrailingJunk:
 		logging.warning("Failed to parse response to %s from %s. Trying again starting from random root." % (domain, addr[0]))
-		domains_that_need_querying.insert(0, (domain, random_name_server_by_tld(domain)))
-		# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
+		if "root-servers.net" in domain:
+			print "Foo3"
+			exit()
+
+		add_to_todo(domain, first = True)
 		return None, addr
 
 	return response, addr
@@ -260,12 +303,15 @@ def receive_next_dns_reply():
 def handle_refused_rcode(domain):
 	# Name server didn't play nice, so try again from random root.
 	logging.debug("Refused. Resolving %s again from root." % domain)
-	domains_that_need_querying.insert(0, (domain, random_name_server_by_tld(domain)))
-	# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
+	if "root-servers.net" in domain:
+		print "Foo4"
+		exit()
+
+	add_to_todo(domain, first = True)
 
 def handle_nxdomain(domain):
 	logging.debug("%s did not exist (NXDOMAIN)" % domain)
-	domains_for_which_response_received[domain] = None
+	resolved_domains[domain] = None
 
 def handle_answer(response, domain):
 	global domains_that_need_querying
@@ -273,12 +319,15 @@ def handle_answer(response, domain):
 	if response.answer[0].rdtype == CNAME_RECORD_RDTYPE:
 		cname = str(response.answer[0][0])[:-1].lower()
 		logging.debug("Got CNAME for %s: %s" % (domain, cname))
-		domains_for_which_response_received[domain] = cname
+		resolved_domains[domain] = cname
 
 		# Now need to resolve the CNAME as well
-		if not cname in domains_for_which_response_received:			
-			domains_that_need_querying.insert(0, (cname, random_name_server_by_tld(cname)))
-			# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
+		if not cname in resolved_domains:			
+			if "root-servers.net" in cname:
+				print "Foo5"
+				exit()
+
+			add_to_todo(cname, first = True)
 
 		# If you encounter detail.tmall.com with CNAME detail.tmall.com.danuoyi.tbcache.com then
 		# you are supposed to connect to the IP of detail.tmall.com.danuoyi.tbcache.com BUT still
@@ -286,7 +335,7 @@ def handle_answer(response, domain):
 	elif response.answer[0].rdtype == A_RECORD_RDTYPE:
 		answer_name = str(response.answer[0].name)[:-1].lower()
 		answer_ip = str(response.answer[0][0])
-		domains_for_which_response_received[answer_name] = answer_ip
+		resolved_domains[answer_name] = answer_ip
 		logging.debug("The answer is %s: %s" % (answer_name, answer_ip))
 
 		# Make sure not to ask about this again if we have it queued.
@@ -319,7 +368,7 @@ def prioritize_servers(authority_names):
 			logging.debug("Prevented asking name server %s for itself." % server)
 			return
 
-		is_ip_known = server[:-1] in domains_for_which_response_received
+		is_ip_known = server[:-1] in resolved_domains
 		seconds_elapsed_since_last_picked = get_seconds_elapsed_since_last_picked(server)
 
 		priority = seconds_elapsed_since_last_picked + is_ip_known
@@ -327,24 +376,19 @@ def prioritize_servers(authority_names):
 
 	return priorities_for_servers
 
-def handle_authority(response, domain):
-	# logging.debug("Handling auth section for %s" % domain)
-
+def get_authority_names(response):
 	# Authority section has the name servers to ask next.
 	authority_names = [str(auth) for auth in response.authority[0] if auth.rdtype == NS_RDTYPE]
 
-	if not authority_names:
+	# Remove ones that didn't resolve.
+	authority_names = [a for a in authority_names if not (a in resolved_domains and resolved_domains[a] is None)]
 
-		# Looks like this doesn't have an IP, for example googleusercontent.com
-		domains_for_which_response_received[domain] = None
-		return
+	return authority_names
 
-	# Additional section sometimes provides IP addresses for some of those servers for convenience.
-	for a in response.additional:
-		if a.rdtype == A_RECORD_RDTYPE:
-			logging.debug("Recording %s as %s" % (str(a.name)[:-1], str(a[0])))
-			domains_for_which_response_received[str(a.name)[:-1]] = str(a[0])
+def set_last_pick_timestamp(authority_name):
+	last_pick_timestamps[authority_name] = time.time()
 
+def choose_authority(authority_names):
 	priorities_for_servers = prioritize_servers(authority_names)
 
 	# No options? I guess we failed.
@@ -356,34 +400,68 @@ def handle_authority(response, domain):
 	authority_name = sorted(priorities_for_servers, reverse = True)[0][1]
 	authority_name = authority_name[:-1].lower()
 	# logging.debug("Picked %s" % authority_name)
-	last_pick_timestamps[authority_name] = time.time()
+	return authority_name
 
+def ask_forward(authority_name, domain):
 	# If this IP was not in additional, then need to resolve it first.
 	# logging.debug("%s known?" % authority_name)
 
 	try:
-		next_ask = domains_for_which_response_received[authority_name]
+		next_ask = resolved_domains[authority_name]
 		# logging.debug("Yes. Knew %s has ip %s." % (authority_name, next_ask))
+
+		if not next_ask:
+			print "Was going to put None to next_ask part 1 because authority %s of domain %s was resolved to None!" % (authority_name, domain)
+			exit()
 	except KeyError:
 		# logging.debug("No. Resolving %s first." % authority_name)
-		domains_that_need_querying.insert(0, (authority_name, random_name_server_by_tld(domain)))
-		# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
+		if "root-servers.net" in authority_name:
+			print authority_name
+			print "Foo6"
+			exit()
+
+		add_to_todo(authority_name, first = True)
 		next_ask = authority_name
 
-	if not next_ask:
-		print "Was going to put None to next_ask!"
-		exit()
+		if not next_ask:
+			print "Was going to put None to next_ask part 2!"
+			exit()
 
+	if "root-servers.net" in domain:
+		print "Foo7"
+		exit()
 	domains_that_need_querying.append((domain, next_ask))
 	# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 	# logging.debug("Will try to resolve %s by asking %s" % domains_that_need_querying[-1])
 	# print domains_that_need_querying
 
+def handle_authority(response, domain):
+	# logging.debug("Handling auth section for %s" % domain)
+
+	authority_names = get_authority_names(response)
+	if not authority_names:
+
+		# Looks like this doesn't have an IP, for example googleusercontent.com
+		resolved_domains[domain] = None
+		return
+
+	authority_name = choose_authority(authority_names)
+	set_last_pick_timestamp(authority_name)
+	ask_forward(authority_name, domain)
 
 def handle_response(response, domain):
 	global domains_that_need_querying
 
+	# This makes this resolver gullible. Believe any IP given by any response, even if not in their authority.
+	for a in response.additional:
+		if a.rdtype == A_RECORD_RDTYPE:
+			# logging.debug("Recording %s as %s" % (str(a.name)[:-1], str(a[0])))
+			resolved_domains[str(a.name)[:-1]] = str(a[0])
+
 	if response is None:
+		if "root-servers.net" in domain:
+			print "Foo8"
+			exit()
 		domains_that_need_querying.insert(0, (domain, random_name_server_by_tld(domain)))
 		# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
@@ -409,6 +487,9 @@ def handle_response(response, domain):
 		# ;ANSWER
 		# ;AUTHORITY
 		# ;ADDITIONAL
+		if "root-servers.net" in domain:
+			print "Foo9"
+			exit()
 		domains_that_need_querying.append((domain, random_name_server_by_tld(domain)))
 		# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
@@ -432,7 +513,7 @@ def read_all_from_socket():
 			replies_received_count += 1
 
 			# It's possible that when receiving this packet, we had already learned the answer from another one.
-			if domain in domains_for_which_response_received:
+			if domain in resolved_domains:
 				logging.debug("%s was already known, skipping packet from %s" % (domain, addr[0]))
 				continue
 

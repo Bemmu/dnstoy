@@ -47,6 +47,13 @@ domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:500
 
 tlds = list(set([d.split(".")[-1] for d in domains]))
 
+def random_name_server_by_tld(domain):
+	tld = domain.split(".")[-1].lower()
+	try:
+		return random.choice(tld_nameservers[tld])
+	except KeyError:
+		return random.choice(root_servers)
+
 # Start by transferring zone describing TLDs
 def transfer_zone():
 	# https://www.dns.icann.org/services/axfr/
@@ -107,8 +114,8 @@ except:
 	with open('zone.pickle', 'w') as f:
 		pickle.dump(tld_nameservers, f)
 
-domains_that_need_querying = [(domain, random.choice(tld_nameservers[domain.split(".")[-1]])) for domain in domains]
-logging.debug("Domains that need querying: %s" % domains_that_need_querying)
+domains_that_need_querying = [(domain, random_name_server_by_tld(domain)) for domain in domains]
+# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 s.setblocking(False)
@@ -152,7 +159,7 @@ def send_queries():
 		try:
 			# print "Do one (%s)" % len(domains_being_queried_latest_last)
 			domain, next_ask = domains_that_need_querying.pop(0)
-			logging.debug("Domains that need querying: %s" % domains_that_need_querying)
+			# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 			if next_ask is None:
 				print "Popped a None!"
 				exit()
@@ -163,7 +170,12 @@ def send_queries():
 
 				# Translate name to IP address if we know it already.
 				try:
-					ip = domains_for_which_response_received[next_ask]
+					try:
+						ip = domains_for_which_response_received[next_ask]
+					except TypeError, e:
+						print "Next ask is", next_ask
+						print "%s" % e
+						exit()
 					logging.debug("Knew that %s is %s, asking there for %s later." % (next_ask, ip, domain))
 					next_ask = ip
 
@@ -176,7 +188,7 @@ def send_queries():
 
 				if next_ask:
 					domains_that_need_querying.append((domain, next_ask))					
-					logging.debug("Domains that need querying: %s" % domains_that_need_querying)
+					# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 					logging.debug("Need to ask about %s to %s" % domains_that_need_querying[-1])
 				return
 
@@ -207,7 +219,7 @@ def retry_queries():
 			if oldest_elapsed > REASK_IN_SECONDS:
 				domains_being_queried_latest_last.pop(0)
 				domains_that_need_querying.insert(0, (domain, random.choice(root_servers)))
-				logging.debug("Domains that need querying: %s" % domains_that_need_querying)
+				# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 				logging.debug("Answer for %s took too long, asking again starting from root." % domain)
 				break
 			else:
@@ -233,11 +245,11 @@ def receive_next_dns_reply():
 	try:
 		bytes_received += len(data)
 		response = parse(data)
-		log_response(response)
+		# log_response(response)
 	except dns.message.TrailingJunk:
 		logging.warning("Failed to parse response to %s from %s. Trying again starting from random root." % (domain, addr[0]))
 		domains_that_need_querying.insert(0, (domain, random.choice(root_servers)))
-		logging.debug("Domains that need querying: %s" % domains_that_need_querying)
+		# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
 	return response, addr
 
@@ -245,7 +257,7 @@ def handle_refused_rcode(domain):
 	# Name server didn't play nice, so try again from random root.
 	logging.debug("Refused. Resolving %s again from root." % domain)
 	domains_that_need_querying.insert(0, (domain, random.choice(root_servers)))
-	logging.debug("Domains that need querying: %s" % domains_that_need_querying)
+	# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
 def handle_nxdomain(domain):
 	logging.debug("%s did not exist (NXDOMAIN)" % domain)
@@ -261,11 +273,9 @@ def handle_answer(response, domain):
 
 		# Now need to resolve the CNAME as well
 		if not cname in domains_for_which_response_received:
-			if addr[0] is None:
-				print "addr[0] was None!"
-				exit()
-			domains_that_need_querying.insert(0, (cname, addr[0]))
-			logging.debug("Domains that need querying: %s" % domains_that_need_querying)
+			random_name_server_by_tld(cname)
+			domains_that_need_querying.insert(0, (cname, name_server_to_ask))
+			# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
 		# If you encounter detail.tmall.com with CNAME detail.tmall.com.danuoyi.tbcache.com then
 		# you are supposed to connect to the IP of detail.tmall.com.danuoyi.tbcache.com BUT still
@@ -279,7 +289,7 @@ def handle_answer(response, domain):
 		# Make sure not to ask about this again if we have it queued.
 		before = len(domains_that_need_querying)
 		domains_that_need_querying = [(d, n) for d,n in domains_that_need_querying if d != answer_name]
-		logging.debug("Domains that need querying: %s" % domains_that_need_querying)
+		# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 		after = len(domains_that_need_querying)
 		if before != after:
 			logging.debug("Removed %s from todo list." % answer_name)
@@ -315,7 +325,7 @@ def prioritize_servers(authority_names):
 	return priorities_for_servers
 
 def handle_authority(response, domain):
-	logging.debug("Handling auth section for %s" % domain)
+	# logging.debug("Handling auth section for %s" % domain)
 
 	# Authority section has the name servers to ask next.
 	authority_names = [str(auth) for auth in response.authority[0] if auth.rdtype == NS_RDTYPE]
@@ -339,22 +349,22 @@ def handle_authority(response, domain):
 		logging.warning("No options for %s" % domain)
 		return
 
-	logging.debug("Priorities: %s" % sorted(priorities_for_servers, reverse = True))
+	# logging.debug("Priorities: %s" % sorted(priorities_for_servers, reverse = True))
 	authority_name = sorted(priorities_for_servers, reverse = True)[0][1]
 	authority_name = authority_name[:-1].lower()
-	logging.debug("Picked %s" % authority_name)
+	# logging.debug("Picked %s" % authority_name)
 	last_pick_timestamps[authority_name] = time.time()
 
 	# If this IP was not in additional, then need to resolve it first.
-	logging.debug("%s known?" % authority_name)
+	# logging.debug("%s known?" % authority_name)
 
 	try:
 		next_ask = domains_for_which_response_received[authority_name]
-		logging.debug("Yes. Knew %s has ip %s." % (authority_name, next_ask))
+		# logging.debug("Yes. Knew %s has ip %s." % (authority_name, next_ask))
 	except KeyError:
-		logging.debug("No. Resolving %s first." % authority_name)
+		# logging.debug("No. Resolving %s first." % authority_name)
 		domains_that_need_querying.insert(0, (authority_name, random.choice(root_servers)))
-		logging.debug("Domains that need querying: %s" % domains_that_need_querying)
+		# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 		next_ask = authority_name
 
 	if not next_ask:
@@ -362,8 +372,8 @@ def handle_authority(response, domain):
 		exit()
 
 	domains_that_need_querying.append((domain, next_ask))
-	logging.debug("Domains that need querying: %s" % domains_that_need_querying)
-	logging.debug("Will try to resolve %s by asking %s" % domains_that_need_querying[-1])
+	# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
+	# logging.debug("Will try to resolve %s by asking %s" % domains_that_need_querying[-1])
 	# print domains_that_need_querying
 
 
@@ -372,7 +382,7 @@ def handle_response(response, domain):
 
 	if response is None:
 		domains_that_need_querying.insert(0, (domain, random.choice(root_servers)))
-		logging.debug("Domains that need querying: %s" % domains_that_need_querying)
+		# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
 	elif response.rcode() == REFUSED_RCODE:
 		handle_refused_rcode(domain)
@@ -397,7 +407,7 @@ def handle_response(response, domain):
 		# ;AUTHORITY
 		# ;ADDITIONAL
 		domains_that_need_querying.append((domain, random.choice(root_servers)))
-		logging.debug("Domains that need querying: %s" % domains_that_need_querying)
+		# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
 
 def read_all_from_socket():

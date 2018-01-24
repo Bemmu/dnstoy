@@ -16,11 +16,11 @@ import collections
 
 query_count = collections.defaultdict(int) 
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 NO_DATA_ERRNO = 35
 DNS_PORT = 53
-MAX_CONCURRENT = 1
+MAX_CONCURRENT = 1000
 REASK_IN_SECONDS = 20.0
 
 A_RECORD_RDTYPE = 1
@@ -43,7 +43,7 @@ domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:500
 # domains = ['yandex.ru', 'express.co.uk', 'olx.com.eg', 'dailystar.co.uk', 'e1.ru', 'pku.edu.cn', 'fudan.edu.cn', 'www.gov.cn.qingcdn.com']
 # domains = ['www.gov.cn.qingcdn.com']
 # domains = ['ns0-e.dns.pipex.net']
-domains = ['ads.gold']
+# domains = ['ads.gold']
 
 tlds = list(set([d.split(".")[-1] for d in domains]))
 
@@ -81,10 +81,9 @@ def transfer_zone():
 	return tld_nameservers
 
 def print_results(domains_for_which_response_received, domains):
-	logging.info("All done!")
-
+	print
 	for domain in domains:
-		sys.stdout.write("\t%s\t" % domain)
+		sys.stdout.write("%s\t" % domain)
 
 		d = domains_for_which_response_received[domain]
 		while d is not None and not is_ip_address(d):
@@ -146,7 +145,8 @@ def send_queries():
 
 	while len(domains_being_queried_latest_last) < MAX_CONCURRENT:
 		if not domains_that_need_querying and domains_being_queried_latest_last:
-			logging.info("Nothing to do but wait now")
+			logging.debug("Nothing to do but wait now")
+			time.sleep(0.5)
 			return
 
 		try:
@@ -177,7 +177,7 @@ def send_queries():
 				if next_ask:
 					domains_that_need_querying.append((domain, next_ask))					
 					logging.debug("Domains that need querying: %s" % domains_that_need_querying)
-					print "Need to ask about %s to %s" % domains_that_need_querying[-1]
+					logging.debug("Need to ask about %s to %s" % domains_that_need_querying[-1])
 				return
 
 			query_count[domain] += 1
@@ -444,11 +444,7 @@ while True:
 	# if todo_count < 80:
 	# 	logging.info('todo: %s' % [x for x in domains_that_need_querying])
 
-	time.sleep(0.4)
-
-	if ongoing_count > 0 and todo_count == 0:
-		logging.info("Sleeping a bit since just waiting for replies...")
-		time.sleep(0.5)
+	# time.sleep(0.4)
 
 	sys.stdout.flush()
 

@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO)
 NO_DATA_ERRNO = 35
 DNS_PORT = 53
 MAX_CONCURRENT = 1000
-REASK_IN_SECONDS = 20.0
+REASK_IN_SECONDS = 5.0
 
 A_RECORD_RDTYPE = 1
 NS_RDTYPE = 2
@@ -44,6 +44,7 @@ domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:500
 # domains = ['www.gov.cn.qingcdn.com']
 # domains = ['ns0-e.dns.pipex.net']
 # domains = ['ads.gold']
+domains = ['oxforddictionaries.com']
 
 tlds = list(set([d.split(".")[-1] for d in domains]))
 
@@ -250,6 +251,7 @@ def receive_next_dns_reply():
 		logging.warning("Failed to parse response to %s from %s. Trying again starting from random root." % (domain, addr[0]))
 		domains_that_need_querying.insert(0, (domain, random_name_server_by_tld(domain)))
 		# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
+		return None, addr
 
 	return response, addr
 
@@ -267,7 +269,7 @@ def handle_answer(response, domain):
 	global domains_that_need_querying
 
 	if response.answer[0].rdtype == CNAME_RECORD_RDTYPE:
-		cname = str(response.answer[0][0])[:-1]
+		cname = str(response.answer[0][0])[:-1].lower()
 		logging.debug("Got CNAME for %s: %s" % (domain, cname))
 		domains_for_which_response_received[domain] = cname
 
@@ -420,6 +422,8 @@ def read_all_from_socket():
 	while True:
 		try:
 			response, addr = receive_next_dns_reply()
+			if not response: # parsing failed, already caused a retry later
+				continue
 
 			domain = str(response.question[0].name)[:-1]
 			domains_being_queried_latest_last = [x for x in domains_being_queried_latest_last if x[0] != domain]
@@ -448,12 +452,12 @@ while True:
 		logging.info("%s queries ongoing, %s to do, %s sent, %s responses / %s kB" % (ongoing_count, todo_count, messages_sent, replies_received_count, bytes_received/1024))
 		last_status_print = time.time()
 
-	# if ongoing_count < 80:
-	# 	logging.info('ongoing: %s' % [x[0] for x in domains_being_queried_latest_last])
-	# if todo_count < 80:
-	# 	logging.info('todo: %s' % [x for x in domains_that_need_querying])
+	if ongoing_count < 10:
+		logging.info('ongoing: %s' % [x[0] for x in domains_being_queried_latest_last])
+	if todo_count < 10:
+		logging.info('todo: %s' % [x for x in domains_that_need_querying])
 
-	# time.sleep(0.4)
+	time.sleep(0.4)
 
 	sys.stdout.flush()
 

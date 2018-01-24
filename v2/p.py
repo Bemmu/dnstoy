@@ -145,7 +145,7 @@ def send_queries():
 	global messages_sent
 
 	while len(domains_being_queried_latest_last) < MAX_CONCURRENT:
-		if not domains_that_need_querying:
+		if not domains_that_need_querying and domains_being_queried_latest_last:
 			logging.info("Nothing to do but wait now")
 			return
 

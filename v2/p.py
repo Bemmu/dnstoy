@@ -136,14 +136,17 @@ except:
 
 domains_that_need_querying = [(domain, random_name_server_by_tld(domain)) for domain in domains]
 
-def add_to_todo(domain, first = True):
+def add_to_todo(domain, first = True, next_ask = None):
 	if domain in [x[0] for x in domains_that_need_querying]:
 		logging.debug("Domain %s was already being queried" % domain)
 	else:
+		if not next_ask:
+			next_ask = random_name_server_by_tld(domain)
+
 		if first:
-			domains_that_need_querying.insert(0, (domain, random_name_server_by_tld(domain)))
+			domains_that_need_querying.insert(0, (domain, next_ask))
 		else:			
-			domains_that_need_querying.append((domain, random_name_server_by_tld(domain)))
+			domains_that_need_querying.append((domain, next_ask))
 	# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
 # logging.debug("Domains that need querying: %s" % domains_that_need_querying)
@@ -430,7 +433,10 @@ def ask_forward(authority_name, domain):
 	if "root-servers.net" in domain:
 		print "Foo7"
 		exit()
-	domains_that_need_querying.append((domain, next_ask))
+
+	add_to_todo(domain, first = False, next_ask = next_ask)
+
+	# domains_that_need_querying.append((domain, next_ask))
 	# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 	# logging.debug("Will try to resolve %s by asking %s" % domains_that_need_querying[-1])
 	# print domains_that_need_querying
@@ -462,7 +468,10 @@ def handle_response(response, domain):
 		if "root-servers.net" in domain:
 			print "Foo8"
 			exit()
-		domains_that_need_querying.insert(0, (domain, random_name_server_by_tld(domain)))
+		# domains_that_need_querying.insert(0, (domain, random_name_server_by_tld(domain)))
+
+		add_to_todo(domain, first = True)
+
 		# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
 	elif response.rcode() == REFUSED_RCODE:
@@ -490,7 +499,10 @@ def handle_response(response, domain):
 		if "root-servers.net" in domain:
 			print "Foo9"
 			exit()
-		domains_that_need_querying.append((domain, random_name_server_by_tld(domain)))
+		# domains_that_need_querying.append((domain, random_name_server_by_tld(domain)))
+
+		add_to_todo(domain, first = False)
+
 		# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
 

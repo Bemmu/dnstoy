@@ -38,13 +38,13 @@ TLD_ZONE_SERVER = 'lax.xfr.dns.icann.org' # https://www.dns.icann.org/services/a
 root_servers = [socket.gethostbyname('%s.root-servers.net' % ch) for ch in 'abcdefghijkl']	
 
 logging.info("Reading domain list.")
-domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:5000]
+domains = [l.split(",")[1].strip() for l in open('../opendns-top-1m.csv')][0:500]
 # domains = ["pages.tmall.com"]
 # domains = ['yandex.ru', 'express.co.uk', 'olx.com.eg', 'dailystar.co.uk', 'e1.ru', 'pku.edu.cn', 'fudan.edu.cn', 'www.gov.cn.qingcdn.com']
 # domains = ['www.gov.cn.qingcdn.com']
 # domains = ['ns0-e.dns.pipex.net']
 # domains = ['ads.gold']
-domains = ['oxforddictionaries.com']
+# domains = ['oxforddictionaries.com']
 
 tlds = list(set([d.split(".")[-1] for d in domains]))
 
@@ -89,21 +89,23 @@ def transfer_zone():
 	return tld_nameservers
 
 def print_results(domains_for_which_response_received, domains):
-	print
-	for domain in domains:
-		sys.stdout.write("%s\t" % domain)
+	fn = "resolved_domains.csv"
+	logging.info("Writing results to %s" % fn)
+	with open(fn, "w") as f:
+		for domain in domains:
+			f.write("%s, " % domain)
 
-		d = domains_for_which_response_received[domain]
-		while d is not None and not is_ip_address(d):
-			sys.stdout.write("%s -> " % d)
-			d = domains_for_which_response_received[d]
+			d = domains_for_which_response_received[domain]
+			while d is not None and not is_ip_address(d):
+				# f.write("%s -> " % d)
+				d = domains_for_which_response_received[d]
 
-		if d is None:
-			sys.stdout.write("None (NXDOMAIN or no ip)")
-		else:
-			sys.stdout.write("%s" % d)
-		print
-
+			if d is None:
+				# f.write("None (NXDOMAIN or no ip)")
+				f.write("None")
+			else:
+				f.write("%s" % d)
+			f.write("\n")
 
 # Avoid doing too many zone transfers by caching into a file.
 try:
@@ -452,12 +454,12 @@ while True:
 		logging.info("%s queries ongoing, %s to do, %s sent, %s responses / %s kB" % (ongoing_count, todo_count, messages_sent, replies_received_count, bytes_received/1024))
 		last_status_print = time.time()
 
-	if ongoing_count < 10:
-		logging.info('ongoing: %s' % [x[0] for x in domains_being_queried_latest_last])
-	if todo_count < 10:
-		logging.info('todo: %s' % [x for x in domains_that_need_querying])
+		if ongoing_count < 10:
+			logging.info('ongoing: %s' % [x[0] for x in domains_being_queried_latest_last])
+		if todo_count < 10:
+			logging.info('todo: %s' % [x for x in domains_that_need_querying])
 
-	time.sleep(0.4)
+	# time.sleep(0.4)
 
 	sys.stdout.flush()
 

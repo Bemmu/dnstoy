@@ -218,7 +218,7 @@ def retry_queries():
 			oldest_elapsed = time.time() - query_timestamp
 			if oldest_elapsed > REASK_IN_SECONDS:
 				domains_being_queried_latest_last.pop(0)
-				domains_that_need_querying.insert(0, (domain, random.choice(root_servers)))
+				domains_that_need_querying.insert(0, (domain, random_name_server_by_tld(domain)))
 				# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 				logging.debug("Answer for %s took too long, asking again starting from root." % domain)
 				break
@@ -248,7 +248,7 @@ def receive_next_dns_reply():
 		# log_response(response)
 	except dns.message.TrailingJunk:
 		logging.warning("Failed to parse response to %s from %s. Trying again starting from random root." % (domain, addr[0]))
-		domains_that_need_querying.insert(0, (domain, random.choice(root_servers)))
+		domains_that_need_querying.insert(0, (domain, random_name_server_by_tld(domain)))
 		# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
 	return response, addr
@@ -256,7 +256,7 @@ def receive_next_dns_reply():
 def handle_refused_rcode(domain):
 	# Name server didn't play nice, so try again from random root.
 	logging.debug("Refused. Resolving %s again from root." % domain)
-	domains_that_need_querying.insert(0, (domain, random.choice(root_servers)))
+	domains_that_need_querying.insert(0, (domain, random_name_server_by_tld(domain)))
 	# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
 def handle_nxdomain(domain):
@@ -363,7 +363,7 @@ def handle_authority(response, domain):
 		# logging.debug("Yes. Knew %s has ip %s." % (authority_name, next_ask))
 	except KeyError:
 		# logging.debug("No. Resolving %s first." % authority_name)
-		domains_that_need_querying.insert(0, (authority_name, random.choice(root_servers)))
+		domains_that_need_querying.insert(0, (authority_name, random_name_server_by_tld(domain)))
 		# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 		next_ask = authority_name
 
@@ -381,7 +381,7 @@ def handle_response(response, domain):
 	global domains_that_need_querying
 
 	if response is None:
-		domains_that_need_querying.insert(0, (domain, random.choice(root_servers)))
+		domains_that_need_querying.insert(0, (domain, random_name_server_by_tld(domain)))
 		# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
 	elif response.rcode() == REFUSED_RCODE:
@@ -406,7 +406,7 @@ def handle_response(response, domain):
 		# ;ANSWER
 		# ;AUTHORITY
 		# ;ADDITIONAL
-		domains_that_need_querying.append((domain, random.choice(root_servers)))
+		domains_that_need_querying.append((domain, random_name_server_by_tld(domain)))
 		# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
 

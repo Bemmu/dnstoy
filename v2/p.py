@@ -272,9 +272,8 @@ def handle_answer(response, domain):
 		domains_for_which_response_received[domain] = cname
 
 		# Now need to resolve the CNAME as well
-		if not cname in domains_for_which_response_received:
-			random_name_server_by_tld(cname)
-			domains_that_need_querying.insert(0, (cname, name_server_to_ask))
+		if not cname in domains_for_which_response_received:			
+			domains_that_need_querying.insert(0, (cname, random_name_server_by_tld(cname)))
 			# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 
 		# If you encounter detail.tmall.com with CNAME detail.tmall.com.danuoyi.tbcache.com then

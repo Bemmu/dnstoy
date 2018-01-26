@@ -1,5 +1,5 @@
-MAX_CONCURRENT = 5000
-REASK_IN_SECONDS = 1.0
+MAX_CONCURRENT = 500
+REASK_IN_SECONDS = 30.0
 
 # 16.01.2018: 21 seconds to resolve 50 domains at 50 parallel
 # 17.01.2018: 8 seconds
@@ -26,7 +26,7 @@ def exit():
 
 query_count = collections.defaultdict(int) 
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 A_RECORD_RDTYPE = 1
 NS_RDTYPE = 2
@@ -52,6 +52,7 @@ messages_sent = 0
 replies_received_count = 0
 bytes_received = 0
 retry_count = 0
+resolved_count = 0
 
 root_servers = []
 def resolve_root_servers():
@@ -97,6 +98,7 @@ def transfer_zone():
 	z = dns.zone.from_xfr(dns.query.xfr(tld_zone_server, ''))
 	names = z.nodes.keys()
 	names.sort()
+	logging.info("Resolving each TLD name server sequentially.")
 	for i, n in enumerate(names):
 		tld = str(n)
 		if tld not in tlds: continue # Skip TLDs we aren't interested in
@@ -199,12 +201,10 @@ def send_queries():
 	logging.debug("send_queries()")
 	global messages_sent
 
-	while len(domains_being_queried_newest_last) < MAX_CONCURRENT:
-		if not domains_that_need_querying and domains_being_queried_newest_last:
-			logging.debug("Nothing to do but wait now")
-			# time.sleep(0.5)
-			return
+	domains_being_queried_count = len(domains_being_queried_newest_last)
+	new_queries_added_inside_loop = 0
 
+	while domains_being_queried_count + new_queries_added_inside_loop < MAX_CONCURRENT:
 		try:
 			# print "Do one (%s)" % len(domains_being_queried_newest_last)
 			domain, next_ask = domains_that_need_querying.pop(0)
@@ -212,8 +212,8 @@ def send_queries():
 				del in_todo_or_ongoing[domain]
 			except KeyError, e: # Not sure how this can happen, but it does.
 				# This is normal, because some packet thought to be expired might have responded later and contained
-				# the answer.
-				continue
+				# the answer, clearing the dict entry.
+				pass
 
 				# logging.warning("Tried to remove %s from in_todo_or_ongoing, but it wasn't there!?" % domain)
 				# exit()
@@ -258,7 +258,8 @@ def send_queries():
 
 					# logging.debug("Domains that need querying: %s" % domains_that_need_querying)
 					logging.debug("Need to ask about %s to %s" % domains_that_need_querying[-1])
-				return
+
+				continue
 
 			query_count[domain] += 1
 			if query_count[domain] <= QUERY_GIVE_UP_THRESHOLD:
@@ -267,6 +268,7 @@ def send_queries():
 				send_async_dns_query(domain, next_ask)
 				messages_sent += 1
 				domains_being_queried_newest_last.append((domain, time.time()))
+				new_queries_added_inside_loop += 1
 				in_todo_or_ongoing[domain] = True
 			else:
 				logging.warning("Asked about %s too many times (%s), giving up." % (domain, query_count[domain]))
@@ -277,8 +279,11 @@ def send_queries():
 			if len(domains_being_queried_newest_last) == 0:
 				print_results(resolved_domains, domains)
 				exit()
-	else:
-		pass
+			else:
+				logging.debug("No domains to query, but some are still ongoing so waiting for those.")
+				time.sleep(0.5)
+
+	logging.info("%s new queries" % new_queries_added_inside_loop)
 
 def oldest_elapsed():
 	domain, query_timestamp = domains_being_queried_newest_last[0]
@@ -354,7 +359,7 @@ def handle_nxdomain(domain):
 	resolved_domains[domain] = None
 
 def handle_answer(response, domain):
-	global domains_that_need_querying
+	global domains_that_need_querying, resolved_count
 
 	for answer in response.answer:
 		if answer.rdtype == CNAME_RECORD_RDTYPE:
@@ -377,6 +382,7 @@ def handle_answer(response, domain):
 			answer_name = str(answer.name)[:-1].lower()
 			answer_ip = str(answer[0])
 			resolved_domains[answer_name] = answer_ip
+			resolved_count += 1
 			logging.debug("The answer is %s: %s" % (answer_name, answer_ip))
 			# print resolved_domains
 
@@ -602,8 +608,8 @@ def print_status():
 	global last_status_print
 	elapsed_since_last_status_print = time.time() - last_status_print
 	if elapsed_since_last_status_print > 1.0:
-		status = "%s ongoing, %s retry, %s to do, %s sent, %s responses / %s kB"
-		fields = (ongoing_count, retry_count, todo_count, messages_sent, replies_received_count, bytes_received/1024)
+		status = "%s resolved, %s ongoing, %s retry, %s to do, %s sent, %s responses / %s kB"
+		fields = (resolved_count, ongoing_count, retry_count, todo_count, messages_sent, replies_received_count, bytes_received/1024)
 		if domains_being_queried_newest_last:
 			status += ", oldest %.2fs, newest %.2fs"
 			fields += (oldest_elapsed(), newest_elapsed()) 
@@ -625,11 +631,11 @@ while True:
 
 	sys.stdout.flush()
 
-	print "Checking for multiples"
+	logging.debug("Checking for multiples")
 	if len(set(domains_that_need_querying)) != len(domains_that_need_querying):
-		print "Domain appeared multiple times!"
+		logging.warning("Some domain appeared multiple times!")
 		exit()
-	print "Done check"
+	logging.debug("Done check")
 
 	retry_queries()
 	send_queries()
